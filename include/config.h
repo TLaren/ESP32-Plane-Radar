@@ -23,12 +23,37 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
-constexpr gpio_num_t kBootPin = GPIO_NUM_9;
+// --- BOOT button (active LOW) ---
+#if defined(BOARD_CYD24)
+constexpr gpio_num_t kBootPin = GPIO_NUM_0;  // CYD BOOT button
+#else
+constexpr gpio_num_t kBootPin = GPIO_NUM_9;  // ESP32-C3 Super Mini
+#endif
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
+#if defined(BOARD_CYD24)
+// --- Display: ESP32-2432S024R, 2.4" ILI9341 240x320 used landscape (320x240), SPI ---
+// Touch (XPT2046) shares this bus: CS 33, IRQ 36 -- not used yet.
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;  // tied to EN on the CYD
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_15;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_2;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_13;
+constexpr gpio_num_t kDisplayPinMiso = GPIO_NUM_12;
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_14;
+constexpr gpio_num_t kDisplayPinBacklight = GPIO_NUM_27;
+
+constexpr int kDisplayWidth = 320;
+constexpr int kDisplayHeight = 240;
+constexpr int kDisplayRotation = 1;  // landscape
+/** Left edge of the 240x240 radar on the panel; the strip to its right is free. */
+constexpr int kRadarOffsetX = 0;
+
+constexpr uint32_t kDisplaySpiWriteHz = 40000000;
+constexpr bool kDisplayInvert = false;
+constexpr bool kDisplayRgbOrder = false;
+#else
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
@@ -43,6 +68,9 @@ constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
+constexpr int kDisplayRotation = 0;
+constexpr int kRadarOffsetX = 0;
+#endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;

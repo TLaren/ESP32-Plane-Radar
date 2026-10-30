@@ -714,7 +714,7 @@ void renderFrame() {
     const DrawScope scope(s_frame);
     drawAircraft();
   }
-  s_frame.pushSprite(0, 0);
+  s_frame.pushSprite(config::kRadarOffsetX, 0);
   tft.setTextDatum(textdatum_t::top_left);
 }
 
