@@ -7,6 +7,10 @@
 
 #include "config.h"
 #include "hardware/display.h"
+#if defined(BOARD_CYD24)
+#include "hardware/cyd_extras.h"
+#include "ui/menu.h"
+#endif
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
@@ -49,6 +53,65 @@ void handleBootButton() {
   }
 }
 
+#if defined(BOARD_CYD24)
+// Touch screen (calibrated, screen coordinates):
+//   menu open                  -> menu handles it (Done closes, radar returns)
+//   top-left RANGE corner      -> next range (same as a BOOT tap)
+//   top-right MENU corner      -> settings menu
+//   on the radar               -> select the plane nearest the tap (empty = clear)
+//   info strip below the radar -> clear the selection
+// One action per touch: re-arms only after the panel reads "released" for
+// ~100 ms, because a resistive panel drops out briefly under a light finger.
+constexpr int kRangeCornerW = 70;
+constexpr int kRangeCornerH = 50;
+constexpr int kRadarSizePx = 240;
+
+void onScreenTap(int x, int y) {
+  Serial.printf("touch: tap %d,%d\n", x, y);
+  if (ui::menu::isOpen()) {
+    if (!ui::menu::tap(x, y)) {
+      showRadarIfConnected();
+    }
+    return;
+  }
+  if (!g_radar_visible) {
+    return;
+  }
+  if (x < kRangeCornerW && y < kRangeCornerH) {
+    onRangeTap();
+  } else if (x >= kRadarSizePx - kRangeCornerW && x < kRadarSizePx &&
+             y < kRangeCornerH) {
+    ui::menu::open();
+  } else if (y < kRadarSizePx && x < kRadarSizePx) {
+    ui::radarSelectAt(x, y);
+  } else {
+    ui::radarClearSelection();
+  }
+}
+
+void handleTouch() {
+  static unsigned long s_last_poll_ms = 0;
+  static bool s_armed = true;
+  static uint8_t s_up_polls = 0;
+  if (millis() - s_last_poll_ms < 25) {
+    return;
+  }
+  s_last_poll_ms = millis();
+  int32_t x = 0;
+  int32_t y = 0;
+  const bool down = tft.getTouch(&x, &y) > 0;
+  if (down) {
+    s_up_polls = 0;
+    if (s_armed) {
+      s_armed = false;
+      onScreenTap(static_cast<int>(x), static_cast<int>(y));
+    }
+  } else if (!s_armed && ++s_up_polls >= 4) {
+    s_armed = true;
+  }
+}
+#endif
+
 // ADS-B fetch runs on its own task: the HTTPS request blocks for ~1-2 s, and
 // keeping it off the main loop lets the radar keep redrawing (dead-reckoned) at
 // 4 Hz throughout. The task publishes into the shared aircraft buffer under a
@@ -74,6 +137,10 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+#if defined(BOARD_CYD24)
+  touchInit();
+  cyd::init();
+#endif
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -92,6 +159,10 @@ void setup() {
 
 void loop() {
   handleBootButton();
+#if defined(BOARD_CYD24)
+  handleTouch();
+  cyd::loop();
+#endif
   wifiLoop();
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -117,7 +188,11 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
+    } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs
+#if defined(BOARD_CYD24)
+               && !ui::menu::isOpen()  // settings page owns the screen
+#endif
+    ) {
       // Redraw at 4 Hz with dead-reckoned positions; the ADS-B fetch runs on
       // its own task (adsbFetchTask).
       g_last_redraw_ms = millis();

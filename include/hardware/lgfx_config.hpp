@@ -15,6 +15,7 @@ class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9341 _panel;
 #endif
   lgfx::Light_PWM _light;
+  lgfx::Touch_XPT2046 _touch;
 
 public:
   LGFX() {
@@ -55,6 +56,26 @@ public:
       cfg.pwm_channel = 7;
       _light.config(cfg);
       _panel.setLight(&_light);
+    }
+    {
+      // Resistive touch on the display's SPI bus. Only "is it pressed" is used
+      // so far (tap = next range); the x/y limits are rough, uncalibrated.
+      auto cfg = _touch.config();
+      cfg.spi_host = HSPI_HOST;
+      cfg.freq = 1000000;
+      cfg.pin_sclk = static_cast<int>(config::kDisplayPinSclk);
+      cfg.pin_mosi = static_cast<int>(config::kDisplayPinMosi);
+      cfg.pin_miso = static_cast<int>(config::kDisplayPinMiso);
+      cfg.pin_cs = static_cast<int>(config::kTouchPinCs);
+      cfg.pin_int = static_cast<int>(config::kTouchPinIrq);
+      cfg.bus_shared = true;
+      cfg.offset_rotation = 0;
+      cfg.x_min = 300;
+      cfg.x_max = 3900;
+      cfg.y_min = 200;
+      cfg.y_max = 3700;
+      _touch.config(cfg);
+      _panel.setTouch(&_touch);
     }
     setPanel(&_panel);
   }

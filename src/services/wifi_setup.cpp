@@ -15,6 +15,9 @@
 #endif
 
 #include "config.h"
+#if defined(BOARD_CYD24)
+#include "hardware/display.h"
+#endif
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -183,7 +186,10 @@ void eraseWifiCredentials() {
   s_wm.resetSettings();
   s_wm.erase();
   WiFi.disconnect(true, true);
-  WiFi.persistent(false);
+  // Was persistent(false): after a wipe/forced portal, the credentials entered
+  // in that same boot were then never written to flash, so the NEXT boot asked
+  // again. Arduino's default is true; put it back.
+  WiFi.persistent(true);
 
   WiFi.mode(WIFI_OFF);
   delay(100);
@@ -400,6 +406,38 @@ bool bootButtonConsumeTap() {
   return tap;
 }
 
+#if defined(BOARD_CYD24)
+/** Full-screen "Reset Wi-Fi?" prompt; true if the screen is tapped within 5 s.
+ *  On cancel the screen is cleared; the radar repaints itself within 250 ms. */
+bool confirmWifiResetByTouch() {
+  constexpr unsigned long kConfirmMs = 5000;
+  tft.fillScreen(config::kColorYellow);
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.setTextColor(config::kTextOnYellow, config::kColorYellow);
+  tft.setFont(&fonts::Font4);
+  const int cx = tft.width() / 2;
+  const int cy = tft.height() / 2;
+  tft.drawString("Reset Wi-Fi?", cx, cy - 40);
+  tft.setFont(&fonts::Font2);
+  tft.drawString("Tap the screen to confirm", cx, cy);
+  tft.drawString("Cancels in 5 s", cx, cy + 24);
+  while (touchDown()) {
+    delay(20);
+  }
+  bool confirmed = false;
+  const unsigned long until = millis() + kConfirmMs;
+  while (static_cast<long>(until - millis()) > 0) {
+    if (touchDown()) {
+      confirmed = true;
+      break;
+    }
+    delay(20);
+  }
+  tft.fillScreen(static_cast<uint16_t>(0x0000));
+  return confirmed;
+}
+#endif
+
 void bootButtonPollLongPress() {
   if (wifiBootButtonPressed()) {
     portENTER_CRITICAL(&s_boot_mux);
@@ -413,8 +451,22 @@ void bootButtonPollLongPress() {
     if (!s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
+#if defined(BOARD_CYD24)
+      // CYD: BOOT is held through every upload (auto-reset doesn't work), so a
+      // bare long-press would wipe WiFi + location on each flash. Only act
+      // while the radar is up, and only after a tap on the screen confirms.
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("BOOT held — ignored (not connected; portal opens by itself)");
+      } else if (confirmWifiResetByTouch()) {
+        Serial.println("BOOT held + tap — resetting WiFi");
+        wifiResetCredentialsAndReboot();
+      } else {
+        Serial.println("BOOT held — WiFi reset cancelled (no tap)");
+      }
+#else
       Serial.println("BOOT held — resetting WiFi");
       wifiResetCredentialsAndReboot();
+#endif
     }
   } else {
     portENTER_CRITICAL(&s_boot_mux);

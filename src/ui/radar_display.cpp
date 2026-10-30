@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "config.h"
 #include "hardware/display.h"
@@ -688,7 +689,9 @@ void drawStaticGrid(Gfx& gfx) {
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
+#if !defined(BOARD_CYD24)
   drawScaleLabel(cx, cy, grid_r);
+#endif
   gfx.setTextDatum(textdatum_t::top_left);
 }
 
@@ -705,6 +708,308 @@ bool ensureFrameSprite() {
   return true;
 }
 
+#if defined(BOARD_CYD24)
+// CYD 2.4" (240x320 glass): info panel in the area the 240x240 radar disc
+// doesn't use. Geometry comes from the live tft size, so it works either way:
+//   landscape 320x240 -> 80x240 strip on the right
+//   portrait  240x320 -> 240x80 strip along the bottom
+// Count = everything inside the outer ring; NEAREST/NEXT = airborne only, so
+// aircraft parked at a nearby airport don't sit at the top. Redrawn at 1 Hz.
+// A plane tapped on the radar replaces NEAREST (yellow box + yellow ring on
+// the radar) for kSelectHoldMs, or until it leaves the radar.
+LGFX_Sprite s_panel(&tft);
+bool s_panel_ready = false;
+bool s_panel_failed = false;
+unsigned long s_panel_last_ms = 0;
+
+constexpr unsigned long kSelectHoldMs = 30000;
+constexpr int kSelectTapRadiusPx = 24;  // resistive touch is only roughly accurate
+char s_sel_key[sizeof(services::adsb::Aircraft::callsign)] = "";
+unsigned long s_sel_until_ms = 0;
+services::adsb::Aircraft s_sel_planes[services::adsb::kMaxAircraft];
+
+struct PanelItem {
+  const services::adsb::Aircraft* plane;
+  float dist_km;
+  float brg_deg;
+};
+
+void clearSelection() {
+  if (s_sel_key[0] != '\0') {
+    Serial.println("select: cleared");
+  }
+  s_sel_key[0] = '\0';
+  s_panel_last_ms = 0;  // repaint the panel on the next frame
+}
+
+bool selectionActive() {
+  if (s_sel_key[0] == '\0') {
+    return false;
+  }
+  if (static_cast<long>(s_sel_until_ms - millis()) <= 0) {
+    clearSelection();
+    return false;
+  }
+  return true;
+}
+
+/** Dead-reckoned range/bearing/screen position; false if outside the radar disc. */
+bool placePlane(const services::adsb::Aircraft& plane, unsigned long base_ms,
+                PanelItem* item, int* x, int* y) {
+  float lat = 0.0f;
+  float lon = 0.0f;
+  extrapolatedLatLon(plane, base_ms, &lat, &lon);
+  float dx = 0.0f;
+  float dy = 0.0f;
+  float dist = 0.0f;
+  offsetKmFromCenter(lat, lon, &dx, &dy, &dist);
+  if (!isInsideOuterRingKm(dist)) {
+    return false;
+  }
+  float brg = atan2f(dx, dy) / kDegToRad;
+  if (brg < 0.0f) brg += 360.0f;
+  *item = {&plane, dist, brg};
+  latLonToScreen(lat, lon, x, y);
+  return true;
+}
+
+/** Find the selected plane in a snapshot; clears the selection if it's gone. */
+bool findSelected(const services::adsb::Aircraft* planes, size_t n,
+                  unsigned long base_ms, PanelItem* item, int* x, int* y) {
+  if (!selectionActive()) {
+    return false;
+  }
+  for (size_t i = 0; i < n; ++i) {
+    if (strcmp(planes[i].callsign, s_sel_key) == 0) {
+      if (placePlane(planes[i], base_ms, item, x, y)) {
+        return true;
+      }
+      break;
+    }
+  }
+  clearSelection();
+  return false;
+}
+
+void drawSelectionRing() {
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      s_sel_planes, services::adsb::kMaxAircraft, &base_ms);
+  PanelItem it{};
+  int x = 0;
+  int y = 0;
+  if (!findSelected(s_sel_planes, n, base_ms, &it, &x, &y)) {
+    return;
+  }
+  s_draw->drawCircle(x, y, 13, config::kColorUiYellow);
+  s_draw->drawCircle(x, y, 14, config::kColorUiYellow);
+}
+
+const char* compass8(float deg) {
+  static const char* const kPoints[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  return kPoints[static_cast<int>(lroundf(deg / 45.0f)) & 7];
+}
+
+void formatPanelDist(char* buf, size_t len, const PanelItem& it) {
+  const float d = radar::useMiles() ? it.dist_km * 0.621371f : it.dist_km;
+  snprintf(buf, len, "%.1f%s %s", d, radar::useMiles() ? "mi" : "km",
+           compass8(it.brg_deg));
+}
+
+const char* panelName(const services::adsb::Aircraft& p) {
+  if (p.callsign[0] != '\0') return p.callsign;
+  if (p.type[0] != '\0') return p.type;
+  return "------";
+}
+
+void panelText(const char* text, int x, int y, uint16_t color) {
+  s_panel.setTextColor(color);
+  s_panel.drawString(text, x, y);
+}
+
+// `first` = selected plane (selected=true) or the nearest airborne; may be null.
+// `next` = up to two more, nearest first.
+// Right-hand strip (landscape), 80 px wide.
+void drawPanelSide(size_t on_screen, const PanelItem* first, bool selected,
+                   const PanelItem* next, size_t next_count) {
+  const int w = s_panel.width();
+  const int cx = w / 2;
+  char buf[24];
+  s_panel.drawFastVLine(0, 0, s_panel.height(), radar::kColorGrid);
+  s_panel.setTextDatum(textdatum_t::top_center);
+  s_panel.setFont(&fonts::Font2);
+  panelText("PLANES", cx, 4, radar::kColorGrid);
+  s_panel.setFont(&fonts::Font4);
+  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(on_screen));
+  panelText(buf, cx, 22, radar::kColorLabel);
+  s_panel.drawFastHLine(4, 52, w - 8, radar::kColorGrid);
+  s_panel.setFont(&fonts::Font2);
+  panelText(selected ? "SELECTED" : "NEAREST", cx, 56,
+            selected ? config::kColorUiYellow : radar::kColorGrid);
+  if (first == nullptr) {
+    panelText("none", cx, 74, radar::kColorLabel);
+  } else {
+    const auto& p = *first->plane;
+    panelText(panelName(p), cx, 74, radar::kColorLabel);
+    panelText(p.type, cx, 90, radar::kColorTagType);
+    panelText(p.alt, cx, 106, radar::kColorTagAltitude);
+    formatPanelDist(buf, sizeof(buf), *first);
+    panelText(buf, cx, 122, radar::kColorLabel);
+  }
+  s_panel.drawFastHLine(4, 142, w - 8, radar::kColorGrid);
+  panelText("NEXT", cx, 146, radar::kColorGrid);
+  for (size_t i = 0; i < next_count; ++i) {
+    const int y = 164 + static_cast<int>(i) * 34;
+    panelText(panelName(*next[i].plane), cx, y, radar::kColorLabel);
+    formatPanelDist(buf, sizeof(buf), next[i]);
+    panelText(buf, cx, y + 16, radar::kColorTagAltitude);
+  }
+}
+
+// Bottom strip (portrait), 240x80: | count | nearest/selected | next two |
+void drawPanelBottom(size_t on_screen, const PanelItem* first, bool selected,
+                     const PanelItem* next, size_t next_count) {
+  constexpr int kColCount = 52;
+  constexpr int kColNearest = 92;
+  const int x1 = kColCount;
+  const int x2 = kColCount + kColNearest;
+  char buf[24];
+  s_panel.drawFastHLine(0, 0, s_panel.width(), radar::kColorGrid);
+  s_panel.drawFastVLine(x1, 4, s_panel.height() - 8, radar::kColorGrid);
+  s_panel.drawFastVLine(x2, 4, s_panel.height() - 8, radar::kColorGrid);
+  if (selected) {
+    s_panel.drawRect(x1 + 1, 1, kColNearest - 1, s_panel.height() - 1,
+                     config::kColorUiYellow);
+  }
+
+  s_panel.setTextDatum(textdatum_t::top_center);
+  s_panel.setFont(&fonts::Font2);
+  panelText("PLANES", kColCount / 2, 6, radar::kColorGrid);
+  s_panel.setFont(&fonts::Font4);
+  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(on_screen));
+  panelText(buf, kColCount / 2, 30, radar::kColorLabel);
+
+  s_panel.setFont(&fonts::Font2);
+  s_panel.setTextDatum(textdatum_t::top_left);
+  const int nx = x1 + 5;
+  if (first == nullptr) {
+    panelText("NEAREST", nx, 2, radar::kColorGrid);
+    panelText("none", nx, 18, radar::kColorLabel);
+  } else {
+    const auto& p = *first->plane;
+    panelText(panelName(p), nx, 2, selected ? config::kColorUiYellow : radar::kColorLabel);
+    panelText(p.type, nx, 18, radar::kColorTagType);
+    panelText(p.alt, nx, 34, radar::kColorTagAltitude);
+    formatPanelDist(buf, sizeof(buf), *first);
+    panelText(buf, nx, 50, radar::kColorLabel);
+  }
+
+  const int xx = x2 + 5;
+  panelText("NEXT", xx, 2, radar::kColorGrid);
+  for (size_t i = 0; i < next_count; ++i) {
+    const int y = 18 + static_cast<int>(i) * 32;
+    panelText(panelName(*next[i].plane), xx, y, radar::kColorLabel);
+    formatPanelDist(buf, sizeof(buf), next[i]);
+    panelText(buf, xx, y + 16, radar::kColorTagAltitude);
+  }
+}
+
+void drawSidePanel() {
+  if (s_panel_failed ||
+      (s_panel_last_ms != 0 && millis() - s_panel_last_ms < 1000)) {
+    return;
+  }
+  s_panel_last_ms = millis();
+  const bool side = tft.width() > radar::kSize;
+  const int pw = side ? tft.width() - radar::kSize : tft.width();
+  const int ph = side ? tft.height() : tft.height() - radar::kSize;
+  if (pw <= 0 || ph <= 0) {
+    return;
+  }
+  if (!s_panel_ready) {
+    s_panel.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
+    if (!s_panel.createSprite(pw, ph)) {
+      Serial.println("radar: info panel sprite alloc failed");
+      s_panel_failed = true;
+      return;
+    }
+    Serial.printf("radar: info panel %dx%d (%s)\n", pw, ph, side ? "right" : "bottom");
+    s_panel_ready = true;
+  }
+
+  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      planes, services::adsb::kMaxAircraft, &base_ms);
+
+  PanelItem items[services::adsb::kMaxAircraft];
+  size_t on_screen = 0;
+  size_t airborne = 0;
+  for (size_t i = 0; i < n; ++i) {
+    PanelItem it{};
+    int x = 0;
+    int y = 0;
+    if (!placePlane(planes[i], base_ms, &it, &x, &y)) continue;
+    ++on_screen;
+    if (strcmp(planes[i].alt, "GND") == 0) continue;
+    items[airborne++] = it;
+  }
+  std::sort(items, items + airborne, [](const PanelItem& a, const PanelItem& b) {
+    return a.dist_km < b.dist_km;
+  });
+
+  PanelItem sel{};
+  int sx = 0;
+  int sy = 0;
+  const bool selected = findSelected(planes, n, base_ms, &sel, &sx, &sy);
+  const PanelItem* first = selected ? &sel : (airborne > 0 ? &items[0] : nullptr);
+  PanelItem next[2];
+  size_t next_count = 0;
+  for (size_t i = 0; i < airborne && next_count < 2; ++i) {
+    if (items[i].plane == first->plane) continue;
+    next[next_count++] = items[i];
+  }
+
+  s_panel.fillScreen(radar::kColorBackground);
+  if (side) {
+    drawPanelSide(on_screen, first, selected, next, next_count);
+  } else {
+    drawPanelBottom(on_screen, first, selected, next, next_count);
+  }
+  s_panel.pushSprite(side ? config::kRadarOffsetX + radar::kSize : 0,
+                     side ? 0 : radar::kSize);
+}
+#endif  // BOARD_CYD24
+
+#if defined(BOARD_CYD24)
+// CYD: the range moves off ring 3 (faint green, buried under tags when busy)
+// into the free top-left corner, drawn AFTER the aircraft so nothing covers it.
+// The value is still the ring-3 distance (rings are 1/3 of it apart).
+void drawCornerRange() {
+  char label[12];
+  radar::formatCurrentRing3Label(label, sizeof(label));
+  s_draw->setTextSize(1);
+  s_draw->setTextDatum(textdatum_t::top_left);
+  s_draw->setFont(&fonts::Font2);
+  s_draw->setTextColor(config::kColorLabelGreen, radar::kColorBackground);
+  s_draw->drawString("RANGE", 3, 2);
+  s_draw->setFont(&fonts::FreeSansBold9pt7b);
+  s_draw->setTextColor(config::kColorUiYellow, radar::kColorBackground);
+  s_draw->drawString(label, 3, 19);
+
+  // Top-right: MENU (opens settings), mirrors RANGE on the left.
+  const int rx = radar::kSize - 3;
+  s_draw->setFont(&fonts::Font2);
+  s_draw->setTextDatum(textdatum_t::top_right);
+  s_draw->setTextColor(config::kColorLabelGreen, radar::kColorBackground);
+  s_draw->drawString("MENU", rx, 2);
+  for (int i = 0; i < 3; ++i) {
+    s_draw->fillRect(rx - 22, 21 + i * 6, 22, 3, config::kColorUiYellow);
+  }
+  s_draw->setTextDatum(textdatum_t::top_left);
+}
+#endif
+
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
 // sprite, then blit it to the panel in a single pushSprite. Because the panel
 // is updated in one pass, labels never show an erase/redraw gap — no flicker.
@@ -713,14 +1018,24 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+#if defined(BOARD_CYD24)
+    drawSelectionRing();
+    drawCornerRange();
+#endif
   }
   s_frame.pushSprite(config::kRadarOffsetX, 0);
+#if defined(BOARD_CYD24)
+  drawSidePanel();
+#endif
   tft.setTextDatum(textdatum_t::top_left);
 }
 
 }  // namespace
 
 void radarDisplayDraw() {
+#if defined(BOARD_CYD24)
+  s_panel_last_ms = 0;  // full redraw: repaint the info strip right away too
+#endif
   initPalette();
   initLabelMetrics();
 
@@ -735,6 +1050,40 @@ void radarDisplayDraw() {
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
+
+#if defined(BOARD_CYD24)
+bool radarSelectAt(int tx, int ty) {
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      s_sel_planes, services::adsb::kMaxAircraft, &base_ms);
+  int best = kSelectTapRadiusPx * kSelectTapRadiusPx + 1;
+  const services::adsb::Aircraft* pick = nullptr;
+  for (size_t i = 0; i < n; ++i) {
+    PanelItem it{};
+    int x = 0;
+    int y = 0;
+    if (!placePlane(s_sel_planes[i], base_ms, &it, &x, &y)) continue;
+    const int d = (x - tx) * (x - tx) + (y - ty) * (y - ty);
+    if (d < best) {
+      best = d;
+      pick = &s_sel_planes[i];
+    }
+  }
+  if (pick == nullptr || pick->callsign[0] == '\0') {
+    clearSelection();
+    return false;
+  }
+  strncpy(s_sel_key, pick->callsign, sizeof(s_sel_key) - 1);
+  s_sel_key[sizeof(s_sel_key) - 1] = '\0';
+  s_sel_until_ms = millis() + kSelectHoldMs;
+  s_panel_last_ms = 0;
+  Serial.printf("select: %s (%d px from tap)\n", s_sel_key,
+                static_cast<int>(lroundf(sqrtf(static_cast<float>(best)))));
+  return true;
+}
+
+void radarClearSelection() { clearSelection(); }
+#endif
 
 void radarDisplayRefreshAircraft() {
   initPalette();

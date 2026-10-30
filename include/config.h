@@ -34,8 +34,11 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 constexpr unsigned long kBootTapMinMs = 40UL;
 
 #if defined(BOARD_CYD24)
-// --- Display: ESP32-2432S024R, 2.4" ILI9341 240x320 used landscape (320x240), SPI ---
-// Touch (XPT2046) shares this bus: CS 33, IRQ 36 -- not used yet.
+// --- Display: ESP32-2432S024R, 2.4" ILI9341 240x320, used PORTRAIT, SPI ---
+// This panel ignores the row/column swap: rotations 1/5 still show portrait
+// (Tim's bench 2026-10-30). 5 = un-mirrored portrait but software thinks 320x240;
+// 4 = mirrored. So: portrait rotation 0 (try 2 if upside down).
+// Touch (XPT2046) shares this bus: CS 33, IRQ 36. Used for tap = next range.
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;  // tied to EN on the CYD
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_15;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_2;
@@ -43,11 +46,26 @@ constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_13;
 constexpr gpio_num_t kDisplayPinMiso = GPIO_NUM_12;
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_14;
 constexpr gpio_num_t kDisplayPinBacklight = GPIO_NUM_27;
+constexpr gpio_num_t kTouchPinCs = GPIO_NUM_33;
+constexpr gpio_num_t kTouchPinIrq = GPIO_NUM_36;
+// RGB LED (common anode, active LOW) and light sensor -- usual CYD pins;
+// the boot R/G/B test confirms them.
+constexpr int kLedPinR = 4;
+constexpr int kLedPinG = 17;  // this board: G/B swapped vs the usual CYD (Tim's bench 10-30)
+constexpr int kLedPinB = 16;
+constexpr int kLdrPin = 34;
+// LDR calibration (raw ADC, 0 dB). Placeholders until the serial "ldr:" log
+// gives real dark/bright readings. Either order works (dark may be > bright).
+constexpr int kLdrDarkRaw = 300;
+constexpr int kLdrBrightRaw = 0;
+// LED proximity alert: airborne, closer than this and lower than this.
+constexpr float kAlertDistKm = 3.219f;  // 2 mi
+constexpr int kAlertAltFt = 3000;
 
-constexpr int kDisplayWidth = 320;
-constexpr int kDisplayHeight = 240;
-constexpr int kDisplayRotation = 1;  // landscape
-/** Left edge of the 240x240 radar on the panel; the strip to its right is free. */
+constexpr int kDisplayWidth = 240;
+constexpr int kDisplayHeight = 320;
+constexpr int kDisplayRotation = 0;  // portrait; radar on top, info strip below
+/** Left edge of the 240x240 radar on the panel. */
 constexpr int kRadarOffsetX = 0;
 
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
@@ -91,6 +109,10 @@ constexpr bool kAdsbShowGroundAircraft = false;
 constexpr uint16_t kColorBlack = 0x0000;
 constexpr uint16_t kColorYellow = 0xFFE0;
 constexpr uint16_t kTextOnYellow = kColorBlack;
+/** CYD corner labels + menu text: the grid green, brightened to read on 2.4". */
+constexpr uint16_t kColorLabelGreen = 0x3E4B;  // rgb(60, 200, 90)
+/** CYD radar/menu yellow (range value, menu, selection), toned down from 0xFFE0. */
+constexpr uint16_t kColorUiYellow = 0xDE40;  // rgb(220, 200, 0)
 constexpr uint16_t kTextOnBlack = 0xFFFF;
 
 }  // namespace config
