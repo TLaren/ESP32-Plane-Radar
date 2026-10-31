@@ -80,6 +80,85 @@ public:
     setPanel(&_panel);
   }
 };
+#elif defined(BOARD_JC3636)
+/** LovyanGFX device: Guition JC3636W518C, ST77916 over QSPI + CST816 touch.
+ *  Follows LovyanGFX's own lgfx_user/LGFX_JC3636W518.hpp (needs LovyanGFX >= 1.2.26). */
+class LGFX : public lgfx::LGFX_Device {
+  lgfx::Panel_ST77916 _panel;
+  lgfx::Bus_SPI _bus;
+  lgfx::Light_PWM _light;
+  lgfx::Touch_CST816S _touch;
+
+public:
+  LGFX() {
+    {
+      auto cfg = _bus.config();
+      cfg.spi_host = SPI2_HOST;
+      cfg.spi_mode = 0;
+      cfg.freq_write = config::kDisplaySpiWriteHz;
+      cfg.freq_read = 16000000UL;
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+      cfg.pin_sclk = static_cast<int>(config::kDisplayPinSclk);
+      cfg.pin_io0 = static_cast<int>(config::kDisplayPinD0);
+      cfg.pin_io1 = static_cast<int>(config::kDisplayPinD1);
+      cfg.pin_io2 = static_cast<int>(config::kDisplayPinD2);
+      cfg.pin_io3 = static_cast<int>(config::kDisplayPinD3);
+      _bus.config(cfg);
+      _panel.setBus(&_bus);
+    }
+    {
+      auto cfg = _panel.config();
+      cfg.pin_cs = static_cast<int>(config::kDisplayPinCs);
+      cfg.pin_rst = static_cast<int>(config::kDisplayPinRst);
+      cfg.pin_busy = -1;
+      cfg.panel_width = 360;
+      cfg.panel_height = 360;
+      cfg.memory_width = 360;
+      cfg.memory_height = 360;
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits = 1;
+      cfg.readable = false;  // no QSPI read path
+      cfg.invert = config::kDisplayInvert;
+      cfg.rgb_order = config::kDisplayRgbOrder;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = false;
+      _panel.config(cfg);
+    }
+    {
+      auto cfg = _light.config();
+      cfg.pin_bl = static_cast<int>(config::kDisplayPinBacklight);
+      cfg.invert = false;
+      cfg.freq = 5000;
+      cfg.pwm_channel = 7;
+      _light.config(cfg);
+      _panel.setLight(&_light);
+    }
+    {
+      auto cfg = _touch.config();
+      cfg.i2c_port = 0;
+      cfg.i2c_addr = 0x15;
+      cfg.pin_sda = static_cast<int>(config::kTouchPinSda);
+      cfg.pin_scl = static_cast<int>(config::kTouchPinScl);
+      cfg.pin_int = static_cast<int>(config::kTouchPinInt);
+      cfg.pin_rst = static_cast<int>(config::kTouchPinRst);
+      cfg.freq = 400000;
+      cfg.x_min = 0;
+      cfg.x_max = 359;
+      cfg.y_min = 0;
+      cfg.y_max = 359;
+      cfg.offset_rotation = 0;
+      cfg.bus_shared = false;
+      _touch.config(cfg);
+      _panel.setTouch(&_touch);
+    }
+    setPanel(&_panel);
+  }
+};
 #else
 /** LovyanGFX device: GC9A01 on SPI. Pin values come from config.h. */
 class LGFX : public lgfx::LGFX_Device {

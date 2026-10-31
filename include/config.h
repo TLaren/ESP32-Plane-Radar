@@ -4,14 +4,33 @@
 
 #include <driver/gpio.h>
 
+// Boards with a touch screen share the touch UI: RANGE/MENU, tap a plane, menu.
+#if defined(BOARD_CYD24) || defined(BOARD_JC3636)
+#define PLANE_RADAR_TOUCH_UI 1
+#else
+#define PLANE_RADAR_TOUCH_UI 0
+#endif
+
 namespace config {
 
 // --- Wi-Fi portal ---
+// Each board type gets its own setup network and network name, so two units on
+// one LAN don't fight over plane-radar.local (Tim runs a CYD and a round one).
+#if defined(BOARD_CYD24)
+constexpr char kPortalApName[] = "PlaneRadar-CYD";
+constexpr char kPortalHostname[] = "plane-radar-cyd";
+constexpr char kPortalHostUrl[] = "plane-radar-cyd.local";
+#elif defined(BOARD_JC3636)
+constexpr char kPortalApName[] = "PlaneRadar-Round";
+constexpr char kPortalHostname[] = "plane-radar-round";
+constexpr char kPortalHostUrl[] = "plane-radar-round.local";
+#else
 constexpr char kPortalApName[] = "PlaneRadar-Setup";
-constexpr char kPortalIp[] = "192.168.4.1";
 /** mDNS host (no ".local" suffix); browser: http://plane-radar.local */
 constexpr char kPortalHostname[] = "plane-radar";
 constexpr char kPortalHostUrl[] = "plane-radar.local";
+#endif
+constexpr char kPortalIp[] = "192.168.4.1";
 
 /** Per-attempt STA connect wait (ms); retried kWifiConnectAttempts times. */
 constexpr unsigned long kWifiConnectAttemptMs = 15000;
@@ -26,6 +45,8 @@ constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 // --- BOOT button (active LOW) ---
 #if defined(BOARD_CYD24)
 constexpr gpio_num_t kBootPin = GPIO_NUM_0;  // CYD BOOT button
+#elif defined(BOARD_JC3636)
+constexpr gpio_num_t kBootPin = GPIO_NUM_0;  // JC3636W518C BOOT button
 #else
 constexpr gpio_num_t kBootPin = GPIO_NUM_9;  // ESP32-C3 Super Mini
 #endif
@@ -64,13 +85,42 @@ constexpr int kAlertAltFt = 3000;
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 320;
-constexpr int kDisplayRotation = 0;  // portrait; radar on top, info strip below
+constexpr int kDisplayRotation = 2;  // portrait, USB at the bottom (Tim); 0 = flipped
 /** Left edge of the 240x240 radar on the panel. */
 constexpr int kRadarOffsetX = 0;
+constexpr int kRadarOffsetY = 0;
 
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 constexpr bool kDisplayInvert = false;
 constexpr bool kDisplayRgbOrder = false;
+#elif defined(BOARD_JC3636)
+// --- Display: Guition JC3636W518C (_I_Y), 1.85" round 360x360, ST77916, QSPI ---
+// Pins from LovyanGFX's lgfx_user/LGFX_JC3636W518.hpp (vendor pincfg.h).
+// Touch: CST816 capacitive on I2C 0x15 (pins per felipedelpozo/adblock, which
+// cross-checked the vendor demo) -- confirm on the bench.
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_9;
+constexpr gpio_num_t kDisplayPinD0 = GPIO_NUM_11;
+constexpr gpio_num_t kDisplayPinD1 = GPIO_NUM_12;
+constexpr gpio_num_t kDisplayPinD2 = GPIO_NUM_13;
+constexpr gpio_num_t kDisplayPinD3 = GPIO_NUM_14;
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_10;
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_47;
+constexpr gpio_num_t kDisplayPinBacklight = GPIO_NUM_15;
+constexpr gpio_num_t kTouchPinSda = GPIO_NUM_7;
+constexpr gpio_num_t kTouchPinScl = GPIO_NUM_8;
+constexpr gpio_num_t kTouchPinRst = GPIO_NUM_40;
+constexpr gpio_num_t kTouchPinInt = GPIO_NUM_41;
+
+constexpr int kDisplayWidth = 360;
+constexpr int kDisplayHeight = 360;
+constexpr int kDisplayRotation = 0;
+// The radar fills the panel (radar::kSize = 360 via kUiScale in radar_theme.h).
+constexpr int kRadarOffsetX = 0;
+constexpr int kRadarOffsetY = 0;
+
+constexpr uint32_t kDisplaySpiWriteHz = 40000000;
+constexpr bool kDisplayInvert = true;    // LovyanGFX's JC3636 config
+constexpr bool kDisplayRgbOrder = true;
 #else
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
@@ -88,6 +138,7 @@ constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
 constexpr int kDisplayRotation = 0;
 constexpr int kRadarOffsetX = 0;
+constexpr int kRadarOffsetY = 0;
 #endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---

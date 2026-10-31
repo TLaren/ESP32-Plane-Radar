@@ -1,6 +1,8 @@
 #pragma once
 
-#if defined(BOARD_CYD24)
+#include "config.h"
+
+#if PLANE_RADAR_TOUCH_UI
 
 namespace ui::menu {
 

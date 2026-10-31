@@ -15,7 +15,7 @@
 #endif
 
 #include "config.h"
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
 #include "hardware/display.h"
 #endif
 #include "services/radar_location.h"
@@ -406,7 +406,7 @@ bool bootButtonConsumeTap() {
   return tap;
 }
 
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
 /** Full-screen "Reset Wi-Fi?" prompt; true if the screen is tapped within 5 s.
  *  On cancel the screen is cleared; the radar repaints itself within 250 ms. */
 bool confirmWifiResetByTouch() {
@@ -451,8 +451,8 @@ void bootButtonPollLongPress() {
     if (!s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
-#if defined(BOARD_CYD24)
-      // CYD: BOOT is held through every upload (auto-reset doesn't work), so a
+#if PLANE_RADAR_TOUCH_UI
+      // Touch boards: on the CYD BOOT is held through every upload (auto-reset doesn't work), so a
       // bare long-press would wipe WiFi + location on each flash. Only act
       // while the radar is up, and only after a tap on the screen confirms.
       if (WiFi.status() != WL_CONNECTED) {

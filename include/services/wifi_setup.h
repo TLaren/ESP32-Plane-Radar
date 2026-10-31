@@ -1,8 +1,14 @@
 #pragma once
 
+#include "config.h"
+
 /** True when the next boot should show the setup screen first (after credential reset). */
 bool wifiShowsSetupScreenOnBoot();
 void wifiResetCredentialsAndReboot();
+#if PLANE_RADAR_TOUCH_UI
+/** Full-screen "Reset Wi-Fi?" prompt; true if the screen is tapped within 5 s. */
+bool confirmWifiResetByTouch();
+#endif
 /** Boot flow: connect with UI, open portal only if saved creds fail. */
 bool wifiSetupConnect();
 /** Reconnect using saved creds; never opens the captive portal. */

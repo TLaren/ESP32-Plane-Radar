@@ -7,7 +7,7 @@
 
 #include "config.h"
 #include "hardware/display.h"
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
 #include "hardware/cyd_extras.h"
 #include "ui/menu.h"
 #endif
@@ -53,8 +53,8 @@ void handleBootButton() {
   }
 }
 
-#if defined(BOARD_CYD24)
-// Touch screen (calibrated, screen coordinates):
+#if PLANE_RADAR_TOUCH_UI
+// Touch screen (screen coordinates; the CYD's resistive panel is calibrated):
 //   menu open                  -> menu handles it (Done closes, radar returns)
 //   top-left RANGE corner      -> next range (same as a BOOT tap)
 //   top-right MENU corner      -> settings menu
@@ -62,9 +62,18 @@ void handleBootButton() {
 //   info strip below the radar -> clear the selection
 // One action per touch: re-arms only after the panel reads "released" for
 // ~100 ms, because a resistive panel drops out briefly under a light finger.
-constexpr int kRangeCornerW = 70;
-constexpr int kRangeCornerH = 50;
+#if defined(BOARD_JC3636)
+// Round 360: RANGE / MENU blocks sit inside the glass either side of N.
+constexpr int kRangeX0 = 40, kRangeX1 = 130;
+constexpr int kMenuX0 = 230, kMenuX1 = 320;
+constexpr int kCornerY1 = 100;
+constexpr int kRadarSizePx = 360;
+#else
+constexpr int kRangeX0 = 0, kRangeX1 = 70;
+constexpr int kMenuX0 = 170, kMenuX1 = 240;
+constexpr int kCornerY1 = 50;
 constexpr int kRadarSizePx = 240;
+#endif
 
 void onScreenTap(int x, int y) {
   Serial.printf("touch: tap %d,%d\n", x, y);
@@ -77,10 +86,9 @@ void onScreenTap(int x, int y) {
   if (!g_radar_visible) {
     return;
   }
-  if (x < kRangeCornerW && y < kRangeCornerH) {
+  if (x >= kRangeX0 && x < kRangeX1 && y < kCornerY1) {
     onRangeTap();
-  } else if (x >= kRadarSizePx - kRangeCornerW && x < kRadarSizePx &&
-             y < kRangeCornerH) {
+  } else if (x >= kMenuX0 && x < kMenuX1 && y < kCornerY1) {
     ui::menu::open();
   } else if (y < kRadarSizePx && x < kRadarSizePx) {
     ui::radarSelectAt(x, y);
@@ -112,6 +120,7 @@ void handleTouch() {
 }
 #endif
 
+
 // ADS-B fetch runs on its own task: the HTTPS request blocks for ~1-2 s, and
 // keeping it off the main loop lets the radar keep redrawing (dead-reckoned) at
 // 4 Hz throughout. The task publishes into the shared aircraft buffer under a
@@ -139,6 +148,8 @@ void setup() {
   displayInit();
 #if defined(BOARD_CYD24)
   touchInit();
+#endif
+#if PLANE_RADAR_TOUCH_UI
   cyd::init();
 #endif
   if (wifiShowsSetupScreenOnBoot()) {
@@ -159,7 +170,7 @@ void setup() {
 
 void loop() {
   handleBootButton();
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
   handleTouch();
   cyd::loop();
 #endif
@@ -189,7 +200,7 @@ void loop() {
     if (!g_radar_visible) {
       showRadarIfConnected();
     } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
                && !ui::menu::isOpen()  // settings page owns the screen
 #endif
     ) {

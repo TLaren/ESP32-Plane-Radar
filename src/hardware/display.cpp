@@ -22,15 +22,17 @@ void displayInit() {
   displayFontInit();
 }
 
-#if defined(BOARD_CYD24)
-namespace {
-constexpr char kTouchPrefs[] = "touch";
-}  // namespace
-
+#if PLANE_RADAR_TOUCH_UI
 bool touchDown() {
   lgfx::touch_point_t tp;
   return tft.getTouchRaw(&tp, 1) > 0;
 }
+#endif
+
+#if defined(BOARD_CYD24)
+namespace {
+constexpr char kTouchPrefs[] = "touch";
+}  // namespace
 
 void touchInit() {
   uint16_t cal[8] = {};

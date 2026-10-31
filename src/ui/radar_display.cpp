@@ -180,7 +180,13 @@ void initPalette() {
   radar::kColorLabel = tft.color565(255, 255, 255);
   radar::kColorCenter = tft.color565(255, 255, 255);
   // GC9A01 BGR panel: swap R/B in color565 so logical red renders red on screen.
+  // Not on the JC3636: its rgb_order=true already gives true colours, and the
+  // swap turned the aircraft (and edge dots) blue (Tim's photo 10-30).
+#if defined(BOARD_JC3636)
+  if (false) {
+#else
   if (config::kDisplayRgbOrder) {
+#endif
     radar::kColorAircraft =
         tft.color565(radar::kAircraftB, radar::kAircraftG, radar::kAircraftR);
   } else {
@@ -689,7 +695,7 @@ void drawStaticGrid(Gfx& gfx) {
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
-#if !defined(BOARD_CYD24)
+#if !PLANE_RADAR_TOUCH_UI
   drawScaleLabel(cx, cy, grid_r);
 #endif
   gfx.setTextDatum(textdatum_t::top_left);
@@ -700,6 +706,9 @@ bool ensureFrameSprite() {
     return true;
   }
   s_frame.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
+#if defined(BOARD_HAS_PSRAM)
+  s_frame.setPsram(true);  // 360x360 = 127 KB; keep internal RAM for Wi-Fi/TLS
+#endif
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
@@ -708,7 +717,10 @@ bool ensureFrameSprite() {
   return true;
 }
 
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
+// Touch boards: plane selection (shared), plus the board's info display:
+//   CYD:    info strip in the glass the 240x240 disc doesn't use (below)
+//   JC3636: info box inside the bottom of the round radar (drawRoundInfo)
 // CYD 2.4" (240x320 glass): info panel in the area the 240x240 radar disc
 // doesn't use. Geometry comes from the live tft size, so it works either way:
 //   landscape 320x240 -> 80x240 strip on the right
@@ -717,13 +729,17 @@ bool ensureFrameSprite() {
 // aircraft parked at a nearby airport don't sit at the top. Redrawn at 1 Hz.
 // A plane tapped on the radar replaces NEAREST (yellow box + yellow ring on
 // the radar) for kSelectHoldMs, or until it leaves the radar.
+#if defined(BOARD_CYD24)
 LGFX_Sprite s_panel(&tft);
 bool s_panel_ready = false;
 bool s_panel_failed = false;
+#endif
 unsigned long s_panel_last_ms = 0;
 
 constexpr unsigned long kSelectHoldMs = 30000;
-constexpr int kSelectTapRadiusPx = 24;  // resistive touch is only roughly accurate
+// Resistive (CYD) touch is only roughly accurate; capacitive is close but the
+// fingertip covers more of the 1.5x-scaled radar.
+constexpr int kSelectTapRadiusPx = radar::px(24);
 char s_sel_key[sizeof(services::adsb::Aircraft::callsign)] = "";
 unsigned long s_sel_until_ms = 0;
 services::adsb::Aircraft s_sel_planes[services::adsb::kMaxAircraft];
@@ -801,8 +817,8 @@ void drawSelectionRing() {
   if (!findSelected(s_sel_planes, n, base_ms, &it, &x, &y)) {
     return;
   }
-  s_draw->drawCircle(x, y, 13, config::kColorUiYellow);
-  s_draw->drawCircle(x, y, 14, config::kColorUiYellow);
+  s_draw->drawCircle(x, y, radar::px(13), config::kColorUiYellow);
+  s_draw->drawCircle(x, y, radar::px(13) + 1, config::kColorUiYellow);
 }
 
 const char* compass8(float deg) {
@@ -822,6 +838,7 @@ const char* panelName(const services::adsb::Aircraft& p) {
   return "------";
 }
 
+#if defined(BOARD_CYD24)
 void panelText(const char* text, int x, int y, uint16_t color) {
   s_panel.setTextColor(color);
   s_panel.drawString(text, x, y);
@@ -979,32 +996,106 @@ void drawSidePanel() {
   s_panel.pushSprite(side ? config::kRadarOffsetX + radar::kSize : 0,
                      side ? 0 : radar::kSize);
 }
-#endif  // BOARD_CYD24
+#endif  // BOARD_CYD24 (info strip)
 
-#if defined(BOARD_CYD24)
+#if defined(BOARD_JC3636)
+// Round 360: the selected plane (yellow box) or, with nothing selected, the
+// nearest airborne one (no box), centred low in the circle above the S label.
+// Drawn into the frame sprite after the aircraft so it stays on top.
+void drawRoundInfo() {
+  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      planes, services::adsb::kMaxAircraft, &base_ms);
+  PanelItem it{};
+  int x = 0;
+  int y = 0;
+  bool selected = findSelected(planes, n, base_ms, &it, &x, &y);
+  if (!selected) {
+    float best = 1e9f;
+    for (size_t i = 0; i < n; ++i) {
+      if (strcmp(planes[i].alt, "GND") == 0) continue;
+      PanelItem c{};
+      if (placePlane(planes[i], base_ms, &c, &x, &y) && c.dist_km < best) {
+        best = c.dist_km;
+        it = c;
+      }
+    }
+    if (it.plane == nullptr) return;
+  }
+  const auto& p = *it.plane;
+  char line1[24];
+  char line2[32];
+  snprintf(line1, sizeof(line1), "%s  %s", panelName(p), p.type);
+  char dist[20];
+  formatPanelDist(dist, sizeof(dist), it);
+  snprintf(line2, sizeof(line2), "%s  %s", p.alt, dist);
+
+  constexpr int kBoxW = 196;
+  constexpr int kBoxH = 46;
+  const int bx = radar::kCenterX - kBoxW / 2;
+  const int by = radar::kSize - 32 - kBoxH;  // above the S label
+  if (selected) {
+    s_draw->fillRoundRect(bx, by, kBoxW, kBoxH, 8, radar::kColorBackground);
+    s_draw->drawRoundRect(bx, by, kBoxW, kBoxH, 8, config::kColorUiYellow);
+  }
+  s_draw->setTextSize(1);
+  s_draw->setTextDatum(textdatum_t::top_center);
+  s_draw->setFont(&fonts::Font2);
+  if (!selected) {
+    s_draw->setTextColor(config::kColorLabelGreen, radar::kColorBackground);
+    s_draw->drawString("NEAREST", radar::kCenterX, by - 14);
+  }
+  s_draw->setFont(&fonts::FreeSansBold9pt7b);
+  s_draw->setTextColor(selected ? config::kColorUiYellow : radar::kColorLabel,
+                       radar::kColorBackground);
+  s_draw->drawString(line1, radar::kCenterX, by + 5);
+  s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+  s_draw->drawString(line2, radar::kCenterX, by + 25);
+}
+#endif  // BOARD_JC3636
+
+#endif  // PLANE_RADAR_TOUCH_UI
+
+#if PLANE_RADAR_TOUCH_UI
 // CYD: the range moves off ring 3 (faint green, buried under tags when busy)
 // into the free top-left corner, drawn AFTER the aircraft so nothing covers it.
 // The value is still the ring-3 distance (rings are 1/3 of it apart).
+// JC3636 (round): no free corners, so both blocks sit just inside the glass
+// on either side of N, on a background patch where they cross the rings.
+#if defined(BOARD_JC3636)
+constexpr int kCornerLx = 66;   // left edge of RANGE
+constexpr int kCornerRx = 294;  // right edge of MENU
+constexpr int kCornerY = 46;
+#else
+constexpr int kCornerLx = 3;
+constexpr int kCornerRx = radar::kSize - 3;
+constexpr int kCornerY = 2;
+#endif
 void drawCornerRange() {
   char label[12];
   radar::formatCurrentRing3Label(label, sizeof(label));
   s_draw->setTextSize(1);
+#if defined(BOARD_JC3636)
+  s_draw->fillRoundRect(kCornerLx - 4, kCornerY - 3, 58, 40, 5, radar::kColorBackground);
+  s_draw->fillRoundRect(kCornerRx - 54, kCornerY - 3, 58, 40, 5, radar::kColorBackground);
+#endif
   s_draw->setTextDatum(textdatum_t::top_left);
   s_draw->setFont(&fonts::Font2);
   s_draw->setTextColor(config::kColorLabelGreen, radar::kColorBackground);
-  s_draw->drawString("RANGE", 3, 2);
+  s_draw->drawString("RANGE", kCornerLx, kCornerY);
   s_draw->setFont(&fonts::FreeSansBold9pt7b);
   s_draw->setTextColor(config::kColorUiYellow, radar::kColorBackground);
-  s_draw->drawString(label, 3, 19);
+  s_draw->drawString(label, kCornerLx, kCornerY + 17);
 
-  // Top-right: MENU (opens settings), mirrors RANGE on the left.
-  const int rx = radar::kSize - 3;
+  // MENU (opens settings), mirrors RANGE on the other side.
+  const int rx = kCornerRx;
   s_draw->setFont(&fonts::Font2);
   s_draw->setTextDatum(textdatum_t::top_right);
   s_draw->setTextColor(config::kColorLabelGreen, radar::kColorBackground);
-  s_draw->drawString("MENU", rx, 2);
+  s_draw->drawString("MENU", rx, kCornerY);
   for (int i = 0; i < 3; ++i) {
-    s_draw->fillRect(rx - 22, 21 + i * 6, 22, 3, config::kColorUiYellow);
+    s_draw->fillRect(rx - 22, kCornerY + 19 + i * 6, 22, 3, config::kColorUiYellow);
   }
   s_draw->setTextDatum(textdatum_t::top_left);
 }
@@ -1018,12 +1109,29 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
     drawSelectionRing();
+#if defined(BOARD_JC3636)
+    drawRoundInfo();
+#endif
     drawCornerRange();
 #endif
   }
-  s_frame.pushSprite(config::kRadarOffsetX, 0);
+#if defined(BOARD_JC3636)
+  // LovyanGFX's Panel_ST77916 (1.2.3x) splits a converted push into chunks of
+  // <= 32767 pixels and re-sends RAMWR before each one, which restarts at the
+  // top of the window: a 240x240 frame showed only its lower part, at the top.
+  // Push in bands that each fit in one chunk, each with its own window.
+  constexpr int kBand = 32767 / radar::kSize;
+  for (int y0 = 0; y0 < radar::kSize; y0 += kBand) {
+    tft.setClipRect(config::kRadarOffsetX, config::kRadarOffsetY + y0, radar::kSize,
+                    std::min(kBand, radar::kSize - y0));
+    s_frame.pushSprite(config::kRadarOffsetX, config::kRadarOffsetY);
+  }
+  tft.clearClipRect();
+#else
+  s_frame.pushSprite(config::kRadarOffsetX, config::kRadarOffsetY);
+#endif
 #if defined(BOARD_CYD24)
   drawSidePanel();
 #endif
@@ -1033,7 +1141,7 @@ void renderFrame() {
 }  // namespace
 
 void radarDisplayDraw() {
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
   s_panel_last_ms = 0;  // full redraw: repaint the info strip right away too
 #endif
   initPalette();
@@ -1051,7 +1159,7 @@ void radarDisplayDraw() {
   tft.setTextDatum(textdatum_t::top_left);
 }
 
-#if defined(BOARD_CYD24)
+#if PLANE_RADAR_TOUCH_UI
 bool radarSelectAt(int tx, int ty) {
   unsigned long base_ms = 0;
   const size_t n = services::adsb::snapshotAircraft(

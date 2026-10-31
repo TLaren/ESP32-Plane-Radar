@@ -1,6 +1,8 @@
 #include "hardware/cyd_extras.h"
 
-#if defined(BOARD_CYD24)
+#include "config.h"
+
+#if PLANE_RADAR_TOUCH_UI
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -19,11 +21,13 @@
 namespace cyd {
 namespace {
 
+#if defined(BOARD_CYD24)
 // RGB LED: common anode, so each pin is active LOW. PWM channels 0-2; the
 // backlight's Light_PWM uses channel 7 (its timer is shared with 6 -- avoid).
 constexpr int kLedPins[3] = {config::kLedPinR, config::kLedPinG, config::kLedPinB};
 constexpr int kLedChannels[3] = {0, 1, 2};
 constexpr int kLedPwmHz = 5000;
+#endif
 
 constexpr char kPrefs[] = "ui";
 int s_screen_pct = 100;
@@ -35,12 +39,21 @@ unsigned long s_last_ldr_ms = 0;
 unsigned long s_last_ldr_log_ms = 0;
 float s_ldr_smooth = -1.0f;
 
+#if defined(BOARD_CYD24)
 unsigned long s_seen_update_ms = 0;
 unsigned long s_green_since = 0;
 unsigned long s_last_alert_check_ms = 0;
 bool s_alert = false;
 uint32_t s_led_shown = 0xFFFFFFFF;
 
+#endif  // BOARD_CYD24
+
+void applyScreen() {
+  const float pct = s_screen_pct * s_light;
+  tft.setBrightness(static_cast<uint8_t>(std::max(8.0f, std::min(255.0f, pct * 2.55f))));
+}
+
+#if defined(BOARD_CYD24)
 void ledWrite(uint8_t r, uint8_t g, uint8_t b) {
   const uint32_t packed = (r << 16) | (g << 8) | b;
   if (packed == s_led_shown) return;
@@ -56,11 +69,6 @@ void ledColor(bool r, bool g, bool b) {
   const int level = static_cast<int>(lroundf(255.0f * s_led_pct / 100.0f * s_light));
   const uint8_t l = static_cast<uint8_t>(std::max(0, std::min(255, level)));
   ledWrite(r ? l : 0, g ? l : 0, b ? l : 0);
-}
-
-void applyScreen() {
-  const float pct = s_screen_pct * s_light;
-  tft.setBrightness(static_cast<uint8_t>(std::max(8.0f, std::min(255.0f, pct * 2.55f))));
 }
 
 /** Any airborne plane within kAlertDistKm and below kAlertAltFt. */
@@ -106,6 +114,7 @@ void updateLight(unsigned long now) {
     s_led_shown = 0xFFFFFFFF;  // re-apply the LED level too
   }
 }
+#endif  // BOARD_CYD24
 
 }  // namespace
 
@@ -117,6 +126,7 @@ void init() {
     s_auto = prefs.getBool("auto", false);
     prefs.end();
   }
+#if defined(BOARD_CYD24)
   analogSetPinAttenuation(config::kLdrPin, ADC_0db);
   for (int i = 0; i < 3; ++i) {
     ledcSetup(kLedChannels[i], kLedPwmHz, 8);
@@ -128,12 +138,14 @@ void init() {
   ledWrite(0, 255, 0); delay(300);
   ledWrite(0, 0, 255); delay(300);
   ledWrite(0, 0, 0);
+#endif
   applyScreen();
   Serial.printf("ui: screen %d%%, led %d%%, auto %s\n", s_screen_pct, s_led_pct,
                 s_auto ? "on" : "off");
 }
 
 void loop() {
+#if defined(BOARD_CYD24)
   const unsigned long now = millis();
   updateLight(now);
 
@@ -163,6 +175,7 @@ void loop() {
   } else {
     ledColor(false, false, false);
   }
+#endif
 }
 
 int screenPct() { return s_screen_pct; }
@@ -176,7 +189,9 @@ void setScreenPct(int pct) {
 
 void setLedPct(int pct) {
   s_led_pct = std::max(0, std::min(100, pct));
+#if defined(BOARD_CYD24)
   s_led_shown = 0xFFFFFFFF;
+#endif
 }
 
 void setAutoBrightness(bool on) {

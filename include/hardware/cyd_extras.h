@@ -1,10 +1,13 @@
 #pragma once
 
-#if defined(BOARD_CYD24)
+#include "config.h"
+
+#if PLANE_RADAR_TOUCH_UI
 
 namespace cyd {
 
-/** RGB LED, light sensor and the brightness settings. Call after touchInit(). */
+/** Brightness settings (both touch boards); RGB LED + light sensor on the CYD
+ *  only (the JC3636 has neither, so its LED/auto settings are inert). */
 void init();
 /** LED state machine + auto brightness. Call every loop(). */
 void loop();
