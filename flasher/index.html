@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plane Radar Flasher</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <style>
+    :root { --bg: #0b1220; --fg: #e6edf3; --dim: #9fb0c3; --accent: #3ec85a; --card: #142033; --warn: #dec800; }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f6f8fa; --fg: #1f2328; --dim: #57606a; --accent: #1a7f37; --card: #ffffff; --warn: #8a6d00; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+           font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    .lead { color: var(--dim); margin: 0 0 24px; }
+    .boards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; }
+    .card img { width: 100%; border-radius: 8px; display: block; margin-bottom: 12px; }
+    .card h2 { margin: 0 0 4px; font-size: 1.15rem; }
+    .card p { margin: 0 0 12px; color: var(--dim); font-size: 0.95rem; }
+    .note { color: var(--warn); font-size: 0.9rem; margin: 12px 0 0; }
+    ol { padding-left: 20px; }
+    a { color: var(--accent); }
+    .unsupported { color: var(--warn); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Plane Radar</h1>
+  <p class="lead">Live ADS-B radar for a CYD or a round ESP32-S3 display. Plug the board in by USB, click its Install button, pick the serial port. Chrome or Edge on a computer.</p>
+
+  <div class="boards">
+    <section class="card">
+      <img src="images/cyd-flights.jpg" alt="CYD 2.4 inch showing the radar and info strip">
+      <h2>CYD 2.4" (ESP32-2432S024R)</h2>
+      <p>Radar, info strip, touch, RGB LED, light sensor.</p>
+      <esp-web-install-button manifest="manifest-cyd24.json">
+        <span slot="unsupported" class="unsupported">This browser can't flash. Use Chrome or Edge on a computer.</span>
+      </esp-web-install-button>
+      <p class="note">Hold the BOOT button on the back for the whole install, then press RST. Without it the install stops with a boot-mode error.</p>
+    </section>
+
+    <section class="card">
+      <img src="images/round-flights.jpg" alt="Round 1.85 inch display showing the radar">
+      <h2>Round 1.85" (Guition JC3636W518C)</h2>
+      <p>360 px round radar, capacitive touch.</p>
+      <esp-web-install-button manifest="manifest-jc3636.json">
+        <span slot="unsupported" class="unsupported">This browser can't flash. Use Chrome or Edge on a computer.</span>
+      </esp-web-install-button>
+      <p class="note">No buttons needed. If the port doesn't show up, unplug and plug it back in.</p>
+    </section>
+  </div>
+
+  <h2>After installing</h2>
+  <ol>
+    <li>CYD only: calibrate the touch screen. Drag from each corner arrow toward the centre.</li>
+    <li>Join the Wi-Fi network shown on the screen (PlaneRadar-CYD or PlaneRadar-Round) from a phone and open 192.168.4.1.</li>
+    <li>Pick your Wi-Fi, enter the password and your latitude and longitude (6 decimals at most), and save.</li>
+  </ol>
+  <p>Source and details: <a href="https://github.com/TLaren/ESP32-Plane-Radar">github.com/TLaren/ESP32-Plane-Radar</a></p>
+</main>
+</body>
+</html>

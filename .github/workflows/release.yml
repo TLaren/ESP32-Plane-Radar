@@ -38,8 +38,10 @@ jobs:
 
       - name: Build and merge
         run: |
-          pio run -e supermini
-          pio run -t merge -e supermini
+          for e in supermini cyd24 jc3636; do
+            pio run -e "$e"
+            pio run -t merge -e "$e"
+          done
 
       - name: Package release files
         run: |
@@ -49,7 +51,9 @@ jobs:
           fi
           mkdir -p dist
           cp .pio/build/supermini/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
-          sha256sum "dist/plane-radar-${VERSION}.bin" > "dist/plane-radar-${VERSION}.bin.sha256"
+          cp .pio/build/cyd24/firmware-merged.bin "dist/plane-radar-cyd24-${VERSION}.bin"
+          cp .pio/build/jc3636/firmware-merged.bin "dist/plane-radar-round-jc3636-${VERSION}.bin"
+          (cd dist && sha256sum *.bin > SHA256SUMS.txt)
           echo "version=${VERSION}" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release

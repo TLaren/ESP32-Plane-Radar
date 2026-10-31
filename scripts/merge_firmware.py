@@ -1,5 +1,5 @@
 # PlatformIO post-build script: merge bootloader + partitions + app into one .bin
-# Usage: pio run -t merge -e supermini
+# Usage: pio run -t merge -e <env>   (supermini, cyd24, jc3636)
 
 Import("env")
 
@@ -16,6 +16,9 @@ def merge_firmware(source, target, env):
     merged = join(build_dir, "firmware-merged.bin")
     mcu = env.BoardConfig().get("build.mcu", "esp32c3")
     flash_size = env.BoardConfig().get("upload.flash_size", "4MB")
+    # The classic ESP32 (CYD) boots its second-stage bootloader from 0x1000;
+    # C3 and S3 boot from 0x0.
+    bootloader_offset = "0x1000" if mcu == "esp32" else "0x0"
 
     bootloader = join(build_dir, "bootloader.bin")
     partitions = join(build_dir, "partitions.bin")
@@ -41,10 +44,10 @@ def merge_firmware(source, target, env):
         "--flash_mode",
         "keep",
         "--flash_freq",
-        "80m",
+        "keep",
         "--flash_size",
         flash_size,
-        "0x0",
+        bootloader_offset,
         bootloader,
         "0x8000",
         partitions,

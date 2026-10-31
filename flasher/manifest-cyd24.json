@@ -1,0 +1,8 @@
+{
+  "name": "Plane Radar - CYD 2.4\" (ESP32-2432S024R)",
+  "version": "VERSION",
+  "new_install_prompt_erase": true,
+  "builds": [
+    { "chipFamily": "ESP32", "parts": [{ "path": "plane-radar-cyd24.bin", "offset": 0 }] }
+  ]
+}

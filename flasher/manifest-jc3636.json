@@ -1,0 +1,8 @@
+{
+  "name": "Plane Radar - Round 1.85\" (Guition JC3636W518C)",
+  "version": "VERSION",
+  "new_install_prompt_erase": true,
+  "builds": [
+    { "chipFamily": "ESP32-S3", "parts": [{ "path": "plane-radar-round-jc3636.bin", "offset": 0 }] }
+  ]
+}

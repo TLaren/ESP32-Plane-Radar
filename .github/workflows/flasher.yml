@@ -1,0 +1,81 @@
+# Build the CYD and round firmware and publish the browser flasher
+# (ESP Web Tools) to GitHub Pages on every push to cyd-and-round.
+# The .bin files are served from Pages itself: ESP Web Tools fetches them from
+# the page, and GitHub release downloads don't allow that (no CORS).
+name: Web flasher
+
+on:
+  push:
+    branches: [cyd-and-round]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+            .pio/libdeps
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build and merge
+        run: |
+          for e in cyd24 jc3636; do
+            pio run -e "$e"
+            pio run -t merge -e "$e"
+          done
+
+      - name: Assemble site
+        run: |
+          VERSION="$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
+          mkdir -p site/images
+          cp flasher/index.html site/
+          cp docs/images/cyd-flights.jpg docs/images/round-flights.jpg site/images/
+          cp .pio/build/cyd24/firmware-merged.bin site/plane-radar-cyd24.bin
+          cp .pio/build/jc3636/firmware-merged.bin site/plane-radar-round-jc3636.bin
+          for m in flasher/manifest-*.json; do
+            sed "s/\"VERSION\"/\"${VERSION}\"/" "$m" > "site/$(basename "$m")"
+          done
+          ls -la site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
