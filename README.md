@@ -4,11 +4,12 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 
 | CYD 2.4" (`env:cyd24`) | Round 1.85" (`env:jc3636`) |
 | --- | --- |
-| <img src="docs/images/cyd-radar.jpg" width="300" alt="CYD build: radar on top, info strip below"> | <img src="docs/images/round-selected.jpg" width="300" alt="Round build with a selected plane"> |
+| <img src="docs/images/cyd-flights.jpg" width="300" alt="CYD: radar on top, info strip with plane count, nearest and next"> | <img src="docs/images/round-flights.jpg" width="300" alt="Round: radar filling the circle, nearest plane above S"> |
+| <img src="docs/images/cyd-settings.jpg" width="300" alt="CYD settings: screen and LED brightness, auto light sensor"> | <img src="docs/images/round-settings.jpg" width="300" alt="Round settings: screen brightness"> |
 
-| Round: nearest plane | Round: settings menu |
-| --- | --- |
-| <img src="docs/images/round-nearest.jpg" width="300" alt="Round build showing the nearest plane"> | <img src="docs/images/round-menu.jpg" width="300" alt="Round build settings menu"> |
+| Tap a plane to select it | Reset Wi-Fi asks to confirm | Setup screen after a reset |
+| --- | --- | --- |
+| <img src="docs/images/round-selected.jpg" width="250" alt="Round: selected plane with yellow ring and info box"> | <img src="docs/images/round-wifi-reset.jpg" width="250" alt="Reset Wi-Fi confirm screen"> | <img src="docs/images/round-wifi-setup.jpg" width="250" alt="Wi-Fi setup instructions on the round screen"> |
 
 ## Boards
 
