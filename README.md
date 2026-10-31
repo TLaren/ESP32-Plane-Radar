@@ -2,6 +2,8 @@
 
 This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/MatixYo/ESP32-Plane-Radar), with touch, an info display and a settings menu. Same code base, one PlatformIO environment per board. The original 1.28" C3 Super Mini build (`env:supermini`) is unchanged and documented further down.
 
+**Install from your browser, no tools needed: [tlaren.github.io/ESP32-Plane-Radar](https://tlaren.github.io/ESP32-Plane-Radar/)** (Chrome or Edge on a computer; it detects the board and installs the right firmware).
+
 | CYD 2.4" (`env:cyd24`) | Round 1.85" (`env:jc3636`) |
 | --- | --- |
 | <img src="docs/images/cyd-flights.jpg" width="300" alt="CYD: radar on top, info strip with plane count, nearest and next"> | <img src="docs/images/round-flights.jpg" width="300" alt="Round: radar filling the circle, nearest plane above S"> |
@@ -33,6 +35,8 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 - Fix: Wi-Fi entered right after a reset is now saved (it was lost on the next boot).
 
 ## Build and flash
+
+The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar/): plug the board in, click Install, pick its port. On the CYD, hold **BOOT** for the whole install, then press RST. It's rebuilt automatically from this branch on every push. To build it yourself instead:
 
 1. Install VS Code and the PlatformIO extension, then open this folder.
 2. Pick the environment for your board: `env:cyd24` or `env:jc3636`.
