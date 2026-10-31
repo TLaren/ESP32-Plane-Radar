@@ -85,7 +85,7 @@ constexpr int kAlertAltFt = 3000;
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 320;
-constexpr int kDisplayRotation = 2;  // portrait, USB at the bottom (Tim); 0 = flipped
+constexpr int kDisplayRotation = 0;  // portrait, USB at the TOP: the panel reads much clearer this way up (Tim 10-31); 2 = USB at the bottom
 /** Left edge of the 240x240 radar on the panel. */
 constexpr int kRadarOffsetX = 0;
 constexpr int kRadarOffsetY = 0;
