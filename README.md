@@ -1,3 +1,58 @@
+# Plane Radar: CYD and round-display fork
+
+This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/MatixYo/ESP32-Plane-Radar), with touch, an info display and a settings menu. Same code base, one PlatformIO environment per board. The original 1.28" C3 Super Mini build (`env:supermini`) is unchanged and documented further down.
+
+| CYD 2.4" (`env:cyd24`) | Round 1.85" (`env:jc3636`) |
+| --- | --- |
+| <img src="docs/images/cyd-radar.jpg" width="300" alt="CYD build: radar on top, info strip below"> | <img src="docs/images/round-selected.jpg" width="300" alt="Round build with a selected plane"> |
+
+| Round: nearest plane | Round: settings menu |
+| --- | --- |
+| <img src="docs/images/round-nearest.jpg" width="300" alt="Round build showing the nearest plane"> | <img src="docs/images/round-menu.jpg" width="300" alt="Round build settings menu"> |
+
+## Boards
+
+| | CYD | Round |
+| --- | --- | --- |
+| Board | ESP32-2432S024R "Cheap Yellow Display" | Guition JC3636W518C (ESP32-S3, 16 MB flash, 8 MB PSRAM) |
+| Screen | 2.4" 240x320 ST7789 (sold as ILI9341), resistive touch | 1.85" round 360x360 ST77916 (QSPI), CST816 capacitive touch |
+| Radar | 240 px on top, 80 px info strip below | 360 px, fills the circle (all sizes 1.5x) |
+| Extras | RGB LED, light sensor | none |
+| Setup Wi-Fi / address | `PlaneRadar-CYD` / `plane-radar-cyd.local` | `PlaneRadar-Round` / `plane-radar-round.local` |
+
+## Features added in this fork
+
+- **Info display.** CYD: a strip with the plane count, the nearest airborne plane (callsign, type, altitude, distance, direction) and the next two. Round: the nearest plane above the S label. Planes on the ground are counted but never shown as "nearest".
+- **Touch.** Tap **RANGE** to cycle 5 / 10 / 15 / 25 km. Tap a plane to select it: it gets a yellow ring and its details show in a yellow box for 30 s. Tap empty radar to clear it.
+- **Settings menu** (tap **MENU**): screen brightness, the saved location, and **Reset Wi-Fi** (asks for a second tap to confirm). The CYD's menu also has LED brightness and auto-brightness.
+- **RGB LED** (CYD): solid red when a plane is within 2 mi and below 3000 ft; green blink on each data update; blue blink when Wi-Fi or data is down.
+- **Light sensor** (CYD): optional auto-dimming of the screen and LED.
+- **Range readout** moved off the rings to a readable corner label.
+- **BOOT long-press Wi-Fi reset** now needs an on-screen tap to confirm, so holding BOOT during an upload no longer wipes your settings.
+- Fix: Wi-Fi entered right after a reset is now saved (it was lost on the next boot).
+
+## Build and flash
+
+1. Install VS Code and the PlatformIO extension, then open this folder.
+2. Pick the environment for your board: `env:cyd24` or `env:jc3636`.
+3. Build and upload.
+   - **CYD:** auto-reset into the bootloader doesn't work on these boards. Hold **BOOT** for the whole upload. Set `upload_port` in `platformio.ini` if PlatformIO picks the wrong COM port.
+   - **Round:** uploads over USB-C with no buttons. The board has no reset button: unplug it to reset.
+4. First boot:
+   - **CYD only:** calibrate the touch screen. Drag from each corner arrow toward the centre rather than tapping the tip, because the very edge of the panel doesn't register.
+   - **Both:** join the setup Wi-Fi from a phone, open `192.168.4.1`, and enter your Wi-Fi, latitude and longitude. Use 6 decimals at most: the page accepts more but keeps the old value.
+
+## Board notes
+
+- **CYD panel:** this 2.4" board's screen is an **ST7789**, built with `-DCYD_PANEL_ST7789`. With the ILI9341 driver the picture is mirrored, the colours are wrong and the bottom 80 rows stay noise.
+- **CYD LED pins:** on the test board green and blue were swapped from the usual CYD pinout (R4, G17, B16). The LED flashes red, green, blue at boot; if yours shows a different order, swap the pins in `config.h`.
+- **CYD light sensor:** retune it for your case with `kLdrDarkRaw` / `kLdrBrightRaw` in `config.h`. The serial log prints `ldr: raw N` every 10 s.
+- **Round screen:** needs LovyanGFX 1.2.26 or newer (`Panel_ST77916`). That driver restarts its write position on every 32k-pixel chunk, so this fork pushes the radar in bands on the round board.
+
+---
+
+*The original project README follows.*
+
 # Plane Radar
 
 <img width="800" height="450" alt="plane-radar" src="https://github.com/user-attachments/assets/716d0992-dab8-47ba-8f1a-2aec7f607419" />
