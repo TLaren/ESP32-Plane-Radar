@@ -1,5 +1,6 @@
 #include "services/radar_location.h"
 
+#include <Arduino.h>
 #include <Preferences.h>
 #include <cstdlib>
 #include <cstring>
@@ -14,8 +15,16 @@ constexpr char kPrefsNamespace[] = "radar";
 constexpr char kKeyLat[] = "lat";
 constexpr char kKeyLon[] = "lon";
 
+// Home = saved on the setup page. Travel = phone GPS / Wi-Fi lookup, RAM only.
+// The travel values are written by the travel task and read by the ADS-B task
+// and the UI, so every access is under this spinlock (a double is two words
+// on the ESP32 and could otherwise be read half-written).
 double s_lat = config::kDefaultRadarLat;
 double s_lon = config::kDefaultRadarLon;
+double s_travel_lat = 0.0;
+double s_travel_lon = 0.0;
+Source s_source = Source::Saved;
+portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
 bool parseCoord(const char* text, double* out) {
   if (text == nullptr || text[0] == '\0') {
@@ -40,8 +49,10 @@ void persist(double lat, double lon) {
   prefs.putDouble(kKeyLat, lat);
   prefs.putDouble(kKeyLon, lon);
   prefs.end();
+  portENTER_CRITICAL(&s_mux);
   s_lat = lat;
   s_lon = lon;
+  portEXIT_CRITICAL(&s_mux);
 }
 
 }  // namespace
@@ -60,9 +71,68 @@ void init() {
   prefs.end();
 }
 
-double lat() { return s_lat; }
+double lat() {
+  portENTER_CRITICAL(&s_mux);
+  const double v = (s_source == Source::Saved) ? s_lat : s_travel_lat;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
 
-double lon() { return s_lon; }
+double lon() {
+  portENTER_CRITICAL(&s_mux);
+  const double v = (s_source == Source::Saved) ? s_lon : s_travel_lon;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
+
+double homeLat() {
+  portENTER_CRITICAL(&s_mux);
+  const double v = s_lat;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
+
+double homeLon() {
+  portENTER_CRITICAL(&s_mux);
+  const double v = s_lon;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
+
+Source source() {
+  portENTER_CRITICAL(&s_mux);
+  const Source v = s_source;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
+
+const char* sourceLabel() {
+  switch (source()) {
+    case Source::PhoneGps:
+      return "phone GPS";
+    case Source::WifiLookup:
+      return "Wi-Fi lookup";
+    default:
+      return "saved";
+  }
+}
+
+void setTravel(double lat, double lon, Source src) {
+  if (!validLatLon(lat, lon) || src == Source::Saved) {
+    return;
+  }
+  portENTER_CRITICAL(&s_mux);
+  s_travel_lat = lat;
+  s_travel_lon = lon;
+  s_source = src;
+  portEXIT_CRITICAL(&s_mux);
+}
+
+void clearTravel() {
+  portENTER_CRITICAL(&s_mux);
+  s_source = Source::Saved;
+  portEXIT_CRITICAL(&s_mux);
+}
 
 bool saveFromStrings(const char* lat_str, const char* lon_str) {
   double lat = 0.0;
@@ -84,8 +154,10 @@ void clear() {
   prefs.remove(kKeyLat);
   prefs.remove(kKeyLon);
   prefs.end();
+  portENTER_CRITICAL(&s_mux);
   s_lat = config::kDefaultRadarLat;
   s_lon = config::kDefaultRadarLon;
+  portEXIT_CRITICAL(&s_mux);
 }
 
 }  // namespace services::location

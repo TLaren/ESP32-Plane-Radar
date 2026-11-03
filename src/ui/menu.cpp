@@ -125,13 +125,18 @@ void drawAll() {
   tft.setFont(&fonts::Font2);
   tft.setTextDatum(textdatum_t::top_center);
   tft.setTextColor(kDim, kBg);
-  tft.drawString("LOCATION", kCx, kLocY);
+  snprintf(buf, sizeof(buf), "LOCATION (%s)", services::location::sourceLabel());
+  tft.drawString(buf, kCx, kLocY);
   tft.setTextColor(kFg, kBg);
   snprintf(buf, sizeof(buf), "%.6f, %.6f", services::location::lat(),
            services::location::lon());
   tft.drawString(buf, kCx, kLocY + 16);
   tft.setTextColor(kDim, kBg);
-  snprintf(buf, sizeof(buf), "change at http://%s", WiFi.localIP().toString().c_str());
+  if (services::location::source() == services::location::Source::Saved) {
+    snprintf(buf, sizeof(buf), "change at http://%s", WiFi.localIP().toString().c_str());
+  } else {
+    snprintf(buf, sizeof(buf), "following the phone");
+  }
   tft.drawString(buf, kCx, kLocY + 34);
 
   tft.setFont(&fonts::Font4);

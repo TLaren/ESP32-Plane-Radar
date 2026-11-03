@@ -1,4 +1,5 @@
 #include "services/adsb_client.h"
+#include "services/net_lock.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -277,6 +278,11 @@ size_t snapshotAircraft(Aircraft* out, size_t max_out,
 }
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
+  // Take turns with the Wi-Fi location lookup (see net_lock.h).
+  services::net::Guard net_guard(30000);
+  if (!net_guard.ok()) {
+    return false;
+  }
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
   String url = kApiBase;

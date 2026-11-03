@@ -48,6 +48,23 @@ The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar
    - **CYD only:** calibrate the touch screen. Drag from each corner arrow toward the centre rather than tapping the tip, because the very edge of the panel doesn't register.
    - **Both:** join the setup Wi-Fi from a phone, open `192.168.4.1`, and enter your Wi-Fi, latitude and longitude. Use 6 decimals at most: the page accepts more but keeps the old value.
 
+## Travelling: follow a phone's position
+
+Take the radar in a car and it can centre itself on where you are, with no typing. It uses your phone's hotspot for internet, and the phone supplies the position.
+
+**One-time setup** (on the radar's setup page, `192.168.4.1` or its LAN address):
+
+1. Under **Phone hotspot name** and **password**, enter your phone's hotspot. Your home Wi-Fi stays as the first network.
+2. On an Android phone, install a GPS-sharing app that serves **NMEA over TCP** (for example Share GPS), start its TCP server and note the port. Enter that port under **Phone GPS app port** (default 10110).
+
+**How it behaves**
+
+- At home the radar joins your home Wi-Fi and uses the saved location. Away from home it joins the phone's hotspot instead (it scans and picks whichever of the two is in range).
+- On the hotspot it reads GPS from the app on the phone (the hotspot gateway is the phone, so no IP to enter). The first fix is used at once. After that the radar re-centres at most once a minute, and only after you have moved more than 1 km, so it does not churn while you drive.
+- **No phone GPS?** After about 20 s it falls back to an approximate position from the Wi-Fi networks in range, looked up through [beaconDB](https://beacondb.net) (only BSSIDs and signal strengths are sent; phone hotspots and networks named `*_nomap` are left out). This is usually good to tens of metres in towns and poor in rural areas; answers worse than 3 km are ignored.
+- The menu shows where the position comes from: *saved*, *phone GPS* or *Wi-Fi lookup*. Back on the home Wi-Fi the saved location returns. The travel position is never saved over your home position.
+- Keep the GPS app running in the background and its battery optimisation off.
+
 ## Board notes
 
 - **CYD panel:** this 2.4" board's screen is an **ST7789**, built with `-DCYD_PANEL_ST7789`. With the ILI9341 driver the picture is mirrored, the colours are wrong and the bottom 80 rows stay noise.

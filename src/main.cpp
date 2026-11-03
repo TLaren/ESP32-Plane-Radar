@@ -13,6 +13,7 @@
 #endif
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/travel_location.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -166,6 +167,10 @@ void setup() {
   // Start the background ADS-B fetch (pinned to core 0, away from the render
   // loop on core 1). It checks Wi-Fi state each cycle.
   xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
+
+  // On the phone-hotspot Wi-Fi this moves the radar to the phone's position
+  // (phone GPS, else a Wi-Fi lookup); on the home network it does nothing.
+  services::travel::start();
 }
 
 void loop() {

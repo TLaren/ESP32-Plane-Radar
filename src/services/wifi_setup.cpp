@@ -80,6 +80,23 @@ WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 
+// Second network for trips: the phone's hotspot. Stored in our own NVS
+// namespace; the home network stays in the ESP-IDF flash config (WiFiManager).
+constexpr char kPhonePrefsNamespace[] = "wifi2";
+constexpr char kPhoneKeySsid[] = "ssid";
+constexpr char kPhoneKeyPass[] = "pass";
+constexpr char kPhoneKeyPort[] = "port";
+
+WiFiManagerParameter s_param_phone_ssid(
+    "phone_ssid", "Phone hotspot name (2nd network, optional)", "", 32);
+WiFiManagerParameter s_param_phone_pass(
+    "phone_pass", "Phone hotspot password (leave blank to keep)", "", 63,
+    " type=\"password\"");
+WiFiManagerParameter s_param_gps_port("gps_port", "Phone GPS app port", "10110", 5,
+                                      " type=\"number\" min=\"1\" max=\"65535\"");
+
+char s_phone_ssid[33] = "";  // RAM copy so other tasks need no NVS access
+
 char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
                                    s_miles_checkbox_attrs, WFM_LABEL_AFTER);
@@ -91,8 +108,10 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
 void refreshPortalParamValues() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
-  snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::lat());
-  snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
+  // Always the saved HOME position: while travelling lat()/lon() hold the phone's
+  // position, and saving that back as "home" would be wrong.
+  snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::homeLat());
+  snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::homeLon());
   s_param_lat.setValue(lat_buf, kCoordParamLen);
   s_param_lon.setValue(lon_buf, kCoordParamLen);
   snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
@@ -101,6 +120,48 @@ void refreshPortalParamValues() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+
+  Preferences phone;
+  if (phone.begin(kPhonePrefsNamespace, false)) {
+    const String ssid = phone.getString(kPhoneKeySsid, "");
+    char port_buf[8];
+    snprintf(port_buf, sizeof(port_buf), "%u",
+             static_cast<unsigned>(phone.getUShort(kPhoneKeyPort, config::kPhoneGpsDefaultPort)));
+    phone.end();
+    s_param_phone_ssid.setValue(ssid.c_str(), 32);
+    s_param_gps_port.setValue(port_buf, 5);
+  }
+  s_param_phone_pass.setValue("", 63);  // never echo a stored password
+}
+
+void savePhoneNetworkFromPortal() {
+  String ssid = s_param_phone_ssid.getValue();
+  ssid.trim();
+  const String pass = s_param_phone_pass.getValue();
+  long port = atol(s_param_gps_port.getValue());
+  if (port < 1 || port > 65535) {
+    port = config::kPhoneGpsDefaultPort;
+  }
+
+  Preferences phone;
+  if (!phone.begin(kPhonePrefsNamespace, false)) {
+    return;
+  }
+  if (ssid.length() == 0) {
+    phone.clear();  // blank name = no second network
+    s_phone_ssid[0] = '\0';
+  } else {
+    const String old_ssid = phone.getString(kPhoneKeySsid, "");
+    phone.putString(kPhoneKeySsid, ssid);
+    if (pass.length() > 0 || old_ssid != ssid) {
+      phone.putString(kPhoneKeyPass, pass);
+    }
+    phone.putUShort(kPhoneKeyPort, static_cast<uint16_t>(port));
+    strncpy(s_phone_ssid, ssid.c_str(), sizeof(s_phone_ssid) - 1);
+    s_phone_ssid[sizeof(s_phone_ssid) - 1] = '\0';
+  }
+  phone.end();
+  Serial.printf("Phone hotspot: \"%s\", GPS port %ld\n", s_phone_ssid, port);
 }
 
 void onPortalParamsSaved() {
@@ -110,6 +171,7 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  savePhoneNetworkFromPortal();
 
   refreshPortalParamValues();
 }
@@ -120,6 +182,9 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_phone_ssid);
+  wm.addParameter(&s_param_phone_pass);
+  wm.addParameter(&s_param_gps_port);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -198,6 +263,14 @@ void eraseWifiCredentials() {
 void resetWifiCredentials() {
   markForceConfigPortal();
   eraseWifiCredentials();
+  {
+    Preferences phone;
+    if (phone.begin(kPhonePrefsNamespace, false)) {
+      phone.clear();
+      phone.end();
+    }
+    s_phone_ssid[0] = '\0';
+  }
   services::location::clear();
   ui::radar::unitsReset();
   Serial.println("WiFi credentials, location, and units cleared");
@@ -273,12 +346,22 @@ void prepareSta() {
   WiFi.setAutoReconnect(true);
 }
 
-void startStaConnect(const String& ssid, const String& pass) {
+/**
+ * `persist` false (the phone hotspot) keeps these credentials in RAM only, so
+ * the flash still holds the HOME network after a reboot or a trip.
+ */
+void startStaConnect(const String& ssid, const String& pass, bool persist) {
   prepareSta();
+  if (!persist) {
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  }
   if (ssid.length() > 0) {
     WiFi.begin(ssid.c_str(), pass.c_str());
   } else {
     WiFi.begin();
+  }
+  if (!persist) {
+    esp_wifi_set_storage(WIFI_STORAGE_FLASH);
   }
 }
 
@@ -295,7 +378,9 @@ bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms) {
   return wifiLinkUp();
 }
 
-bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
+bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui,
+                      bool persist = true,
+                      uint8_t attempts = config::kWifiConnectAttempts) {
   if (wifiLinkUp()) {
     return true;
   }
@@ -305,16 +390,15 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
     statusScreenConnectingBegin(ui_ssid);
   }
 
-  for (uint8_t attempt = 1; attempt <= config::kWifiConnectAttempts; ++attempt) {
+  for (uint8_t attempt = 1; attempt <= attempts; ++attempt) {
     if (attempt > 1) {
-      Serial.printf("WiFi connect retry %u/%u\n", attempt,
-                    config::kWifiConnectAttempts);
+      Serial.printf("WiFi connect retry %u/%u\n", attempt, attempts);
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
       delay(400);
     }
 
-    startStaConnect(ssid, pass);
+    startStaConnect(ssid, pass, persist);
 
     if (waitForLinkWithUi(ui_ssid, config::kWifiConnectAttemptMs)) {
       return true;
@@ -324,7 +408,8 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
   return false;
 }
 
-bool connectSavedNetwork(bool show_ui) {
+/** Reads the SSID/password the Wi-Fi stack currently holds (the saved home network). */
+bool readStackNetwork(String* ssid, String* pass) {
   wifi_mode_t mode = WIFI_MODE_NULL;
   if (esp_wifi_get_mode(&mode) != ESP_OK || mode == WIFI_MODE_NULL) {
     WiFi.mode(WIFI_STA);
@@ -332,11 +417,7 @@ bool connectSavedNetwork(bool show_ui) {
   }
 
   wifi_config_t conf = {};
-  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
-    return false;
-  }
-
-  if (conf.sta.ssid[0] == '\0') {
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK || conf.sta.ssid[0] == '\0') {
     return false;
   }
 
@@ -351,10 +432,98 @@ bool connectSavedNetwork(bool show_ui) {
   memcpy(pass_buf, conf.sta.password, sizeof(conf.sta.password));
   pass_buf[sizeof(conf.sta.password)] = '\0';
 
-  const String ssid(ssid_buf);
-  const String pass(pass_buf);
+  *ssid = String(ssid_buf);
+  *pass = String(pass_buf);
+  return true;
+}
 
-  return tryConnectWithUi(ssid, pass, show_ui);
+// The home network as saved by the setup portal. Captured once per boot (and
+// after the portal) BEFORE any phone-hotspot connect: that connect keeps its
+// credentials in RAM, but esp_wifi_get_config() would then report them.
+String s_home_ssid;
+String s_home_pass;
+bool s_home_captured = false;
+
+void captureHomeNetwork() {
+  s_home_ssid = "";
+  s_home_pass = "";
+  readStackNetwork(&s_home_ssid, &s_home_pass);
+  s_home_captured = true;
+}
+
+bool loadPhoneNetwork(String* ssid, String* pass) {
+  Preferences phone;
+  if (!phone.begin(kPhonePrefsNamespace, false)) {
+    return false;
+  }
+  *ssid = phone.getString(kPhoneKeySsid, "");
+  *pass = phone.getString(kPhoneKeyPass, "");
+  phone.end();
+  return ssid->length() > 0;
+}
+
+/** Which of the two saved networks are on the air? (Both true if the scan fails.) */
+void scanForNetworks(const String& a, const String& b, bool* saw_a, bool* saw_b) {
+  *saw_a = true;
+  *saw_b = true;
+  WiFi.mode(WIFI_STA);
+  const int n = WiFi.scanNetworks(false, true);
+  if (n <= 0) {
+    WiFi.scanDelete();
+    return;
+  }
+  *saw_a = false;
+  *saw_b = false;
+  for (int i = 0; i < n; ++i) {
+    const String ssid = WiFi.SSID(i);
+    if (ssid == a) *saw_a = true;
+    if (ssid == b) *saw_b = true;
+  }
+  WiFi.scanDelete();
+}
+
+bool connectSavedNetwork(bool show_ui) {
+  if (!s_home_captured) {
+    captureHomeNetwork();
+  }
+  String phone_ssid;
+  String phone_pass;
+  const bool have_phone = loadPhoneNetwork(&phone_ssid, &phone_pass) &&
+                          phone_ssid != s_home_ssid;
+  const bool have_home = s_home_ssid.length() > 0;
+  if (!have_home && !have_phone) {
+    return false;
+  }
+
+  bool home_first = true;
+  bool saw_home = true;
+  bool saw_phone = true;
+  if (have_home && have_phone) {
+    // Go by what is on the air, so a trip does not first wait out three failed
+    // attempts at the home network (and the reverse).
+    scanForNetworks(s_home_ssid, phone_ssid, &saw_home, &saw_phone);
+    home_first = !(saw_phone && !saw_home);
+  } else if (!have_home) {
+    home_first = false;
+  }
+
+  // A network that was not seen gets one try instead of three.
+  const uint8_t home_tries = saw_home ? config::kWifiConnectAttempts : 1;
+  const uint8_t phone_tries = saw_phone ? config::kWifiConnectAttempts : 1;
+
+  for (int round = 0; round < 2; ++round) {
+    const bool try_home = (round == 0) == home_first;
+    if (try_home) {
+      if (have_home &&
+          tryConnectWithUi(s_home_ssid, s_home_pass, show_ui, true, home_tries)) {
+        return true;
+      }
+    } else if (have_phone &&
+               tryConnectWithUi(phone_ssid, phone_pass, show_ui, false, phone_tries)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool openConfigPortal() {
@@ -507,6 +676,14 @@ void wifiLoop() {
 bool wifiSetupConnect() {
   initBootButton();
   ensureWifiManager();
+  captureHomeNetwork();  // flash still holds the home network: nothing has connected yet
+  {
+    String p_ssid, p_pass;
+    if (loadPhoneNetwork(&p_ssid, &p_pass)) {
+      strncpy(s_phone_ssid, p_ssid.c_str(), sizeof(s_phone_ssid) - 1);
+      s_phone_ssid[sizeof(s_phone_ssid) - 1] = '\0';
+    }
+  }
 
   const bool force_portal = consumeForceConfigPortal();
   WiFi.setAutoReconnect(false);
@@ -520,6 +697,7 @@ bool wifiSetupConnect() {
   if (force_portal) {
     Serial.println("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
+      captureHomeNetwork();
       WiFi.setAutoReconnect(true);
       Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str());
@@ -539,7 +717,7 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  if (storedWifiCredentials() && connectSavedNetwork(true)) {
+  if ((storedWifiCredentials() || s_phone_ssid[0] != '\0') && connectSavedNetwork(true)) {
     WiFi.setAutoReconnect(true);
     Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
@@ -553,6 +731,7 @@ bool wifiSetupConnect() {
   }
 
   if (openConfigPortal() && wifiLinkUp()) {
+    captureHomeNetwork();
     WiFi.setAutoReconnect(true);
     Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
@@ -562,4 +741,22 @@ bool wifiSetupConnect() {
   Serial.println("WiFi connection failed");
   statusScreenConnectFailed();
   return false;
+}
+
+bool wifiOnPhoneNetwork() {
+  if (s_phone_ssid[0] == '\0' || WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+  const String ssid = WiFi.SSID();
+  return ssid == s_phone_ssid && ssid != s_home_ssid;
+}
+
+uint16_t phoneGpsPort() {
+  Preferences phone;
+  if (!phone.begin(kPhonePrefsNamespace, false)) {
+    return config::kPhoneGpsDefaultPort;
+  }
+  const uint16_t port = phone.getUShort(kPhoneKeyPort, config::kPhoneGpsDefaultPort);
+  phone.end();
+  return port == 0 ? config::kPhoneGpsDefaultPort : port;
 }

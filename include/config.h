@@ -145,6 +145,22 @@ constexpr int kRadarOffsetY = 0;
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;
 
+// --- Travel position (radar follows a phone that provides the hotspot) ---
+/** TCP port of the phone's NMEA/GPS server app (editable on the setup page). */
+constexpr uint16_t kPhoneGpsDefaultPort = 10110;
+/** A GPS fix older than this counts as "no GPS" (app closed, no sky view). */
+constexpr unsigned long kGpsStaleMs = 30000;
+/** The radar is re-centred at most this often... */
+constexpr unsigned long kTravelApplyIntervalMs = 60000;
+/** ...and only after moving at least this far (the first fix applies at once). */
+constexpr double kTravelMinMoveKm = 1.0;
+/** Wi-Fi lookup fallback: wait this long for phone GPS first, then retry this often. */
+constexpr unsigned long kWifiLookupFirstDelayMs = 20000;
+constexpr unsigned long kWifiLookupIntervalMs = 120000;
+/** Ignore lookup answers worse than this (beaconDB falls back to IP location, 25 km). */
+constexpr float kWifiLookupMaxAccuracyM = 3000.0f;
+constexpr char kWifiLookupUrl[] = "https://api.beacondb.net/v1/geolocate";
+
 /** Poll adsb.fi (API public limit: 1 req/s). */
 constexpr unsigned long kAdsbFetchIntervalMs = 5000;
 /** Redraw cadence; aircraft are dead-reckoned along their track/speed so motion

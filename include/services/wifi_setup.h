@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "config.h"
 
 /** True when the next boot should show the setup screen first (after credential reset). */
@@ -13,6 +15,10 @@ bool confirmWifiResetByTouch();
 bool wifiSetupConnect();
 /** Reconnect using saved creds; never opens the captive portal. */
 bool wifiReconnect();
+/** True while connected to the saved phone-hotspot network (not the home one). */
+bool wifiOnPhoneNetwork();
+/** TCP port of the phone's GPS app, as saved on the setup page. */
+uint16_t phoneGpsPort();
 /** Keeps the LAN config portal alive; call every loop() iteration. */
 void wifiLoop();
 bool wifiBootButtonPressed();
