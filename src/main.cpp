@@ -167,14 +167,22 @@ void setup() {
   // Start the background ADS-B fetch (pinned to core 0, away from the render
   // loop on core 1). It checks Wi-Fi state each cycle.
   xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
-
-  // On the phone-hotspot Wi-Fi this moves the radar to the phone's position
-  // (phone GPS, else a Wi-Fi lookup); on the home network it does nothing.
-  services::travel::start();
 }
 
 void loop() {
   handleBootButton();
+  services::travel::poll();  // starts the phone-position task on the hotspot only
+
+  // Free-heap log (serial) every 30 s: min = lowest since boot, blk = largest
+  // single allocation still possible. Diagnosing page/Wi-Fi trouble on the CYD.
+  static unsigned long s_last_heap_log_ms = 0;
+  if (millis() - s_last_heap_log_ms >= 30000) {
+    s_last_heap_log_ms = millis();
+    Serial.printf("heap: free %u min %u blk %u\n",
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(ESP.getMinFreeHeap()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  }
 #if PLANE_RADAR_TOUCH_UI
   handleTouch();
   cyd::loop();

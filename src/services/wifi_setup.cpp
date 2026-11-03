@@ -62,11 +62,35 @@ namespace {
 constexpr char kWifiPrefsNamespace[] = "wifi";
 constexpr char kPrefsForcePortalKey[] = "portal";
 
+/**
+ * WiFiManager keeps its back-button flag and menu state protected. Two portals
+ * share one instance:
+ *  - the setup network (first run / after a reset): Wi-Fi page with the other
+ *    settings on it, as upstream;
+ *  - the LAN page while connected: Setup / Info only. The Wi-Fi page is left out
+ *    on purpose: saving it re-connects with whatever is in its boxes (a blank
+ *    password drops a WPA network) and it is pre-filled with the CURRENT network,
+ *    which on a trip is the phone hotspot.
+ */
+class PortalManager : public WiFiManager {
+ public:
+  void enableBackButton() { _showBack = true; }
+  void useSetupMenu() {
+    _paramsInWifi = true;
+    setMenu(_menuIdsDefault);
+  }
+  void useLanMenu() {
+    static const char* kMenu[] = {"param", "info", "exit"};
+    setMenu(kMenu, 3);  // "param" moves the settings to their own page
+  }
+};
+
 bool s_force_config_portal = false;
-WiFiManager s_wm;
+PortalManager s_wm;
 bool s_wm_configured = false;
 
 void ensureWifiManager();
+void onPortalWifiSaved();
 void startLanWebPortal();
 void stopLanWebPortal();
 bool wifiLinkUp();
@@ -80,12 +104,18 @@ WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 
-// Second network for trips: the phone's hotspot. Stored in our own NVS
-// namespace; the home network stays in the ESP-IDF flash config (WiFiManager).
+// Both networks live in our own NVS namespace (home + the phone's hotspot). The
+// ESP-IDF flash config is only used to import the home network once; after that
+// it can hold whatever network was joined last without mattering.
 constexpr char kPhonePrefsNamespace[] = "wifi2";
 constexpr char kPhoneKeySsid[] = "ssid";
 constexpr char kPhoneKeyPass[] = "pass";
 constexpr char kPhoneKeyPort[] = "port";
+constexpr char kHomeKeySsid[] = "home_ssid";
+constexpr char kHomeKeyPass[] = "home_pass";
+
+WiFiManagerParameter s_param_travel_head(
+    "<br/><hr><b>Phone hotspot for trips (optional)</b><br/>");
 
 WiFiManagerParameter s_param_phone_ssid(
     "phone_ssid", "Phone hotspot name (2nd network, optional)", "", 32);
@@ -182,6 +212,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_travel_head);
   wm.addParameter(&s_param_phone_ssid);
   wm.addParameter(&s_param_phone_pass);
   wm.addParameter(&s_param_gps_port);
@@ -224,20 +255,6 @@ bool consumeForceConfigPortal() {
     prefs.end();
   }
   return true;
-}
-
-bool storedWifiCredentials() {
-  wifi_mode_t mode = WIFI_MODE_NULL;
-  if (esp_wifi_get_mode(&mode) != ESP_OK || mode == WIFI_MODE_NULL) {
-    WiFi.mode(WIFI_STA);
-    delay(50);
-  }
-
-  wifi_config_t conf = {};
-  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
-    return false;
-  }
-  return conf.sta.ssid[0] != '\0';
 }
 
 void eraseWifiCredentials() {
@@ -306,6 +323,8 @@ void ensureWifiManager() {
                            IPAddress(255, 255, 255, 0));
   s_wm.setHostname(config::kPortalHostname);
   s_wm.setAPCallback(onConfigPortalApStarted);
+  s_wm.setSaveConfigCallback(onPortalWifiSaved);
+  s_wm.enableBackButton();
   attachPortalParams(s_wm);
   s_wm_configured = true;
 }
@@ -317,6 +336,7 @@ void startLanWebPortal() {
   }
   refreshPortalParamValues();
   WiFi.mode(WIFI_STA);
+  s_wm.useLanMenu();
   s_wm.setConfigPortalBlocking(false);
 #ifdef WM_MDNS
   MDNS.end();
@@ -346,22 +366,12 @@ void prepareSta() {
   WiFi.setAutoReconnect(true);
 }
 
-/**
- * `persist` false (the phone hotspot) keeps these credentials in RAM only, so
- * the flash still holds the HOME network after a reboot or a trip.
- */
-void startStaConnect(const String& ssid, const String& pass, bool persist) {
+void startStaConnect(const String& ssid, const String& pass) {
   prepareSta();
-  if (!persist) {
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
-  }
   if (ssid.length() > 0) {
     WiFi.begin(ssid.c_str(), pass.c_str());
   } else {
     WiFi.begin();
-  }
-  if (!persist) {
-    esp_wifi_set_storage(WIFI_STORAGE_FLASH);
   }
 }
 
@@ -379,7 +389,6 @@ bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms) {
 }
 
 bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui,
-                      bool persist = true,
                       uint8_t attempts = config::kWifiConnectAttempts) {
   if (wifiLinkUp()) {
     return true;
@@ -398,7 +407,7 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui,
       delay(400);
     }
 
-    startStaConnect(ssid, pass, persist);
+    startStaConnect(ssid, pass);
 
     if (waitForLinkWithUi(ui_ssid, config::kWifiConnectAttemptMs)) {
       return true;
@@ -437,18 +446,57 @@ bool readStackNetwork(String* ssid, String* pass) {
   return true;
 }
 
-// The home network as saved by the setup portal. Captured once per boot (and
-// after the portal) BEFORE any phone-hotspot connect: that connect keeps its
-// credentials in RAM, but esp_wifi_get_config() would then report them.
+// Home network: our own copy in NVS. Written when the setup portal joins a
+// network (see onPortalWifiSaved), and imported once from the stack's flash
+// config the first time this firmware runs.
 String s_home_ssid;
 String s_home_pass;
-bool s_home_captured = false;
 
-void captureHomeNetwork() {
-  s_home_ssid = "";
-  s_home_pass = "";
-  readStackNetwork(&s_home_ssid, &s_home_pass);
-  s_home_captured = true;
+void loadHomeNetwork() {
+  Preferences prefs;
+  if (!prefs.begin(kPhonePrefsNamespace, false)) {
+    return;
+  }
+  s_home_ssid = prefs.getString(kHomeKeySsid, "");
+  s_home_pass = prefs.getString(kHomeKeyPass, "");
+  prefs.end();
+}
+
+void storeHomeNetwork(const String& ssid, const String& pass) {
+  Preferences prefs;
+  if (prefs.begin(kPhonePrefsNamespace, false)) {
+    prefs.putString(kHomeKeySsid, ssid);
+    prefs.putString(kHomeKeyPass, pass);
+    prefs.end();
+  }
+  s_home_ssid = ssid;
+  s_home_pass = pass;
+  Serial.printf("Home Wi-Fi saved: \"%s\"\n", ssid.c_str());
+}
+
+/** Remember the network we are connected to as HOME (never the phone hotspot). */
+void rememberHomeFromLink() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  const String ssid = WiFi.SSID();
+  if (ssid.length() == 0 || ssid == s_phone_ssid) {
+    return;
+  }
+  storeHomeNetwork(ssid, WiFi.psk());
+}
+
+void onPortalWifiSaved() { rememberHomeFromLink(); }
+
+void importHomeFromFlashOnce() {
+  if (s_home_ssid.length() > 0) {
+    return;
+  }
+  String ssid;
+  String pass;
+  if (readStackNetwork(&ssid, &pass) && ssid != s_phone_ssid) {
+    storeHomeNetwork(ssid, pass);
+  }
 }
 
 bool loadPhoneNetwork(String* ssid, String* pass) {
@@ -462,68 +510,80 @@ bool loadPhoneNetwork(String* ssid, String* pass) {
   return ssid->length() > 0;
 }
 
-/** Which of the two saved networks are on the air? (Both true if the scan fails.) */
-void scanForNetworks(const String& a, const String& b, bool* saw_a, bool* saw_b) {
-  *saw_a = true;
-  *saw_b = true;
+enum class ConnectResult { Connected, NotInRange, Failed };
+
+/** Which saved networks are on the air? Returns false if the scan did not work. */
+bool scanForNetworks(const String& home, const String& phone, bool* saw_home,
+                     bool* saw_phone) {
+  *saw_home = false;
+  *saw_phone = false;
+  // Stop the stack retrying the old network first: a scan started while it is
+  // mid-connect fails, and the old code then fell back to 3 x 15 s of retries.
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, false);
+  delay(150);
   WiFi.mode(WIFI_STA);
-  const int n = WiFi.scanNetworks(false, true);
-  if (n <= 0) {
-    WiFi.scanDelete();
-    return;
+  int n = WiFi.scanNetworks(false, true);
+  if (n < 0) {
+    delay(500);
+    n = WiFi.scanNetworks(false, true);
   }
-  *saw_a = false;
-  *saw_b = false;
+  if (n < 0) {
+    WiFi.scanDelete();
+    return false;
+  }
   for (int i = 0; i < n; ++i) {
     const String ssid = WiFi.SSID(i);
-    if (ssid == a) *saw_a = true;
-    if (ssid == b) *saw_b = true;
+    if (home.length() > 0 && ssid == home) *saw_home = true;
+    if (phone.length() > 0 && ssid == phone) *saw_phone = true;
   }
   WiFi.scanDelete();
+  return true;
 }
 
-bool connectSavedNetwork(bool show_ui) {
-  if (!s_home_captured) {
-    captureHomeNetwork();
-  }
+/**
+ * Join the home network if it is in range, else the phone hotspot. A network
+ * that is not on the air is never tried, so out of range of both this returns
+ * after one scan (NotInRange) instead of retrying for minutes.
+ */
+ConnectResult connectSavedNetwork(bool show_ui) {
   String phone_ssid;
   String phone_pass;
   const bool have_phone = loadPhoneNetwork(&phone_ssid, &phone_pass) &&
                           phone_ssid != s_home_ssid;
   const bool have_home = s_home_ssid.length() > 0;
   if (!have_home && !have_phone) {
-    return false;
+    return ConnectResult::Failed;
   }
 
-  bool home_first = true;
-  bool saw_home = true;
-  bool saw_phone = true;
-  if (have_home && have_phone) {
-    // Go by what is on the air, so a trip does not first wait out three failed
-    // attempts at the home network (and the reverse).
-    scanForNetworks(s_home_ssid, phone_ssid, &saw_home, &saw_phone);
-    home_first = !(saw_phone && !saw_home);
-  } else if (!have_home) {
-    home_first = false;
+  if (show_ui) {
+    statusScreenConnectingBegin("a saved Wi-Fi");
   }
+  bool saw_home = have_home;
+  bool saw_phone = have_phone;
+  if (!scanForNetworks(s_home_ssid, phone_ssid, &saw_home, &saw_phone)) {
+    // Scan unusable: assume both are there and let the connect attempts decide.
+    saw_home = have_home;
+    saw_phone = have_phone;
+  }
+  Serial.printf("Wi-Fi scan: home \"%s\" %s, phone \"%s\" %s\n",
+                s_home_ssid.c_str(), saw_home ? "seen" : "not seen",
+                phone_ssid.c_str(), saw_phone ? "seen" : "not seen");
 
-  // A network that was not seen gets one try instead of three.
-  const uint8_t home_tries = saw_home ? config::kWifiConnectAttempts : 1;
-  const uint8_t phone_tries = saw_phone ? config::kWifiConnectAttempts : 1;
-
-  for (int round = 0; round < 2; ++round) {
-    const bool try_home = (round == 0) == home_first;
-    if (try_home) {
-      if (have_home &&
-          tryConnectWithUi(s_home_ssid, s_home_pass, show_ui, true, home_tries)) {
-        return true;
-      }
-    } else if (have_phone &&
-               tryConnectWithUi(phone_ssid, phone_pass, show_ui, false, phone_tries)) {
-      return true;
+  bool tried = false;
+  if (have_home && saw_home) {
+    tried = true;
+    if (tryConnectWithUi(s_home_ssid, s_home_pass, show_ui, 2)) {
+      return ConnectResult::Connected;
     }
   }
-  return false;
+  if (have_phone && saw_phone) {
+    tried = true;
+    if (tryConnectWithUi(phone_ssid, phone_pass, show_ui, 2)) {
+      return ConnectResult::Connected;
+    }
+  }
+  return tried ? ConnectResult::Failed : ConnectResult::NotInRange;
 }
 
 bool openConfigPortal() {
@@ -532,6 +592,7 @@ bool openConfigPortal() {
   WiFi.mode(WIFI_OFF);
   delay(50);
   statusScreenPortal();
+  s_wm.useSetupMenu();
   s_wm.setConfigPortalBlocking(false);
   s_wm.startConfigPortal(config::kPortalApName);
   while (s_wm.getConfigPortalActive()) {
@@ -622,11 +683,10 @@ void bootButtonPollLongPress() {
       s_long_press_handled = true;
 #if PLANE_RADAR_TOUCH_UI
       // Touch boards: on the CYD BOOT is held through every upload (auto-reset doesn't work), so a
-      // bare long-press would wipe WiFi + location on each flash. Only act
-      // while the radar is up, and only after a tap on the screen confirms.
-      if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("BOOT held — ignored (not connected; portal opens by itself)");
-      } else if (confirmWifiResetByTouch()) {
+      // bare long-press would wipe WiFi + location on each flash. It only acts
+      // after a tap on the screen confirms. That also works while NOT
+      // connected, which is the way out when no saved network is in range.
+      if (confirmWifiResetByTouch()) {
         Serial.println("BOOT held + tap — resetting WiFi");
         wifiResetCredentialsAndReboot();
       } else {
@@ -655,7 +715,7 @@ void wifiResetCredentialsAndReboot() {
 bool wifiReconnect() {
   initBootButton();
   Serial.println("WiFi reconnecting...");
-  return connectSavedNetwork(true);
+  return connectSavedNetwork(true) == ConnectResult::Connected;
 }
 
 void wifiLoop() {
@@ -676,7 +736,6 @@ void wifiLoop() {
 bool wifiSetupConnect() {
   initBootButton();
   ensureWifiManager();
-  captureHomeNetwork();  // flash still holds the home network: nothing has connected yet
   {
     String p_ssid, p_pass;
     if (loadPhoneNetwork(&p_ssid, &p_pass)) {
@@ -684,6 +743,8 @@ bool wifiSetupConnect() {
       s_phone_ssid[sizeof(s_phone_ssid) - 1] = '\0';
     }
   }
+  loadHomeNetwork();
+  importHomeFromFlashOnce();  // first run of this firmware: keep the saved home Wi-Fi
 
   const bool force_portal = consumeForceConfigPortal();
   WiFi.setAutoReconnect(false);
@@ -697,7 +758,7 @@ bool wifiSetupConnect() {
   if (force_portal) {
     Serial.println("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
-      captureHomeNetwork();
+      rememberHomeFromLink();
       WiFi.setAutoReconnect(true);
       Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str());
@@ -717,21 +778,30 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  if ((storedWifiCredentials() || s_phone_ssid[0] != '\0') && connectSavedNetwork(true)) {
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
-    return true;
-  }
-
-  if (storedWifiCredentials()) {
+  String probe_ssid;
+  String probe_pass;
+  const bool have_saved = s_home_ssid.length() > 0 || loadPhoneNetwork(&probe_ssid, &probe_pass);
+  if (have_saved) {
+    const ConnectResult r = connectSavedNetwork(true);
+    if (r == ConnectResult::Connected) {
+      WiFi.setAutoReconnect(true);
+      Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+                    WiFi.localIP().toString().c_str());
+      return true;
+    }
+    if (r == ConnectResult::NotInRange) {
+      // Normal on a trip (hotspot not on yet, home far away): do not open the
+      // setup portal, the main loop keeps looking. BOOT 3 s + tap = way out.
+      Serial.println("No saved Wi-Fi in range — will keep looking");
+      return false;
+    }
     Serial.println("Saved WiFi could not connect — opening setup portal");
   } else {
     Serial.println("No saved WiFi — opening setup portal");
   }
 
   if (openConfigPortal() && wifiLinkUp()) {
-    captureHomeNetwork();
+    rememberHomeFromLink();
     WiFi.setAutoReconnect(true);
     Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());

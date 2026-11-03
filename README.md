@@ -52,10 +52,10 @@ The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar
 
 Take the radar in a car and it can centre itself on where you are, with no typing. It uses your phone's hotspot for internet, and the phone supplies the position.
 
-**One-time setup** (on the radar's setup page, `192.168.4.1` or its LAN address):
+**One-time setup**
 
-1. Under **Phone hotspot name** and **password**, enter your phone's hotspot. Your home Wi-Fi stays as the first network.
-2. On an Android phone, install a GPS-sharing app that serves **NMEA over TCP** (for example Share GPS), start its TCP server and note the port. Enter that port under **Phone GPS app port** (default 10110).
+1. On the radar's **Setup** page (LAN address, or the setup network on first run), enter your phone's hotspot name and password under *Phone hotspot for trips*. Your home Wi-Fi stays the first network and is remembered separately; the hotspot can never replace it.
+2. For live GPS, run an Android app that serves **NMEA over TCP** on the phone (the radar connects to the hotspot gateway, which is the phone) and enter its port under *Phone GPS app port* (default 10110). Without an app, the Wi-Fi lookup below still gives an approximate position.
 
 **How it behaves**
 
@@ -63,6 +63,7 @@ Take the radar in a car and it can centre itself on where you are, with no typin
 - On the hotspot it reads GPS from the app on the phone (the hotspot gateway is the phone, so no IP to enter). The first fix is used at once. After that the radar re-centres at most once a minute, and only after you have moved more than 1 km, so it does not churn while you drive.
 - **No phone GPS?** After about 20 s it falls back to an approximate position from the Wi-Fi networks in range, looked up through [beaconDB](https://beacondb.net) (only BSSIDs and signal strengths are sent; phone hotspots and networks named `*_nomap` are left out). This is usually good to tens of metres in towns and poor in rural areas; answers worse than 3 km are ignored.
 - The menu shows where the position comes from: *saved*, *phone GPS* or *Wi-Fi lookup*. Back on the home Wi-Fi the saved location returns. The travel position is never saved over your home position.
+- While connected, the LAN page has **Setup** and **Info** only. Changing the home Wi-Fi means *Reset Wi-Fi* in the menu (or hold BOOT 3 s and tap), which opens the setup network again. That also works when no saved network is in range.
 - Keep the GPS app running in the background and its battery optimisation off.
 
 ## Board notes

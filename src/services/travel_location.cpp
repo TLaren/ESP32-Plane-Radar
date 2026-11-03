@@ -41,11 +41,6 @@ constexpr size_t kMaxSentAps = 12;
  * mesh/guest copies), the hotspot we are on, and networks named *_nomap.
  */
 bool lookupFromWifi(double* lat, double* lon) {
-  services::net::Guard guard(20000);
-  if (!guard.ok()) {
-    return false;
-  }
-
   uint8_t own[6] = {};
   const uint8_t* cur = WiFi.BSSID();
   if (cur != nullptr) {
@@ -96,6 +91,12 @@ bool lookupFromWifi(double* lat, double* lon) {
   }
   body += "]}";
 
+  // The scan above needs no lock; only the TLS request takes turns with the
+  // ADS-B fetch (heap, see net_lock.h), so planes are not held up for the scan.
+  services::net::Guard guard(20000);
+  if (!guard.ok()) {
+    return false;
+  }
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -281,8 +282,15 @@ void travelTask(void*) {
 
 }  // namespace
 
-void start() {
-  xTaskCreatePinnedToCore(travelTask, "travel", 12288, nullptr, 1, nullptr, 0);
+void poll() {
+  // Created the first time the unit is on the phone hotspot, never at home:
+  // a CYD has no PSRAM and the task's stack alone is ~10 KB of heap.
+  static bool s_started = false;
+  if (s_started || !wifiOnPhoneNetwork()) {
+    return;
+  }
+  s_started = true;
+  xTaskCreatePinnedToCore(travelTask, "travel", 10240, nullptr, 1, nullptr, 0);
 }
 
 }  // namespace services::travel
