@@ -37,7 +37,7 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 
 ## Build and flash
 
-The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar/): plug the board in, click Install, pick its port. On the CYD, hold **BOOT** for the whole install, then press RST. It's rebuilt automatically from this branch on every push. To build it yourself instead:
+The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar/): plug the board in, click Install, pick its port. On the CYD, hold **BOOT** for the whole install, then press RST. It's rebuilt automatically from this branch on every push. The flasher covers only the two boards with fixed hardware (CYD and round); the Super Mini build depends on how you wire it, so it has to be built from source with pins to match. To build it yourself instead:
 
 1. Install VS Code and the PlatformIO extension, then open this folder.
 2. Pick the environment for your board: `env:cyd24` or `env:jc3636`.
