@@ -11,6 +11,13 @@
 #define PLANE_RADAR_TOUCH_UI 0
 #endif
 
+// Extra serial diagnostics and test aids (heap lines, Wi-Fi drop reasons, fetch
+// failure details, the "skip home Wi-Fi" setup checkbox). OFF by default; build
+// with -DPLANE_RADAR_DEBUG=1 to turn them on.
+#ifndef PLANE_RADAR_DEBUG
+#define PLANE_RADAR_DEBUG 0
+#endif
+
 namespace config {
 
 // --- Wi-Fi portal ---

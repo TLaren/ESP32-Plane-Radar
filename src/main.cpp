@@ -173,6 +173,7 @@ void loop() {
   handleBootButton();
   services::travel::poll();  // starts the phone-position task on the hotspot only
 
+#if PLANE_RADAR_DEBUG
   // Free-heap log (serial) every 30 s: min = lowest since boot, blk = largest
   // single allocation still possible. Diagnosing page/Wi-Fi trouble on the CYD.
   static unsigned long s_last_heap_log_ms = 0;
@@ -183,6 +184,7 @@ void loop() {
                   static_cast<unsigned>(ESP.getMinFreeHeap()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
   }
+#endif
 #if PLANE_RADAR_TOUCH_UI
   handleTouch();
   cyd::loop();

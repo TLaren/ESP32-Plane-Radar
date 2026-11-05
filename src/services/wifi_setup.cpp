@@ -111,6 +111,8 @@ constexpr char kPhonePrefsNamespace[] = "wifi2";
 constexpr char kPhoneKeySsid[] = "ssid";
 constexpr char kPhoneKeyPass[] = "pass";
 constexpr char kPhoneKeyPort[] = "port";
+constexpr char kPhoneKeySkipHome[] = "skiphome";  // debug: ignore the home network
+constexpr char kPhoneKeyTravel[] = "travel";      // travel mode on/off
 constexpr char kHomeKeySsid[] = "home_ssid";
 constexpr char kHomeKeyPass[] = "home_pass";
 
@@ -126,6 +128,49 @@ WiFiManagerParameter s_param_gps_port("gps_port", "Phone GPS app port", "10110",
                                       " type=\"number\" min=\"1\" max=\"65535\"");
 
 char s_phone_ssid[33] = "";  // RAM copy so other tasks need no NVS access
+
+#if PLANE_RADAR_DEBUG
+// DEBUG: when ticked (and a hotspot is saved) the home network is never tried, so
+// the travel code can be tested at a desk with the serial monitor attached.
+char s_skip_home_checkbox_attrs[32] = "type=\"checkbox\"";
+WiFiManagerParameter s_param_skip_home(
+    "skip_home", "DEBUG: skip home Wi-Fi, join only the phone hotspot (untick to undo)",
+    "T", 2, s_skip_home_checkbox_attrs, WFM_LABEL_AFTER);
+#endif
+
+// Travel mode costs RAM (a task, a GPS socket). Default: on only with PSRAM.
+char s_travel_checkbox_attrs[32] = "type=\"checkbox\"";
+WiFiManagerParameter s_param_travel_on(
+    "travel_on",
+    "Travel mode: follow the phone's GPS (needs RAM; boards without PSRAM may run "
+    "out of memory). Takes effect after a reboot.",
+    "T", 2, s_travel_checkbox_attrs, WFM_LABEL_AFTER);
+
+bool readTravelEnabled() {
+  const bool def = psramFound();
+  Preferences prefs;
+  if (!prefs.begin(kPhonePrefsNamespace, true)) {
+    return def;
+  }
+  const bool on = prefs.getBool(kPhoneKeyTravel, def);
+  prefs.end();
+  return on;
+}
+
+#if PLANE_RADAR_DEBUG
+bool readSkipHome() {
+  Preferences prefs;
+  if (!prefs.begin(kPhonePrefsNamespace, true)) {
+    return false;
+  }
+  const bool skip = prefs.getBool(kPhoneKeySkipHome, false);
+  prefs.end();
+  return skip;
+}
+#else
+// Without the debug build a flag left in flash by an earlier debug build is ignored.
+bool readSkipHome() { return false; }
+#endif
 
 char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
@@ -161,6 +206,14 @@ void refreshPortalParamValues() {
     s_param_phone_ssid.setValue(ssid.c_str(), 32);
     s_param_gps_port.setValue(port_buf, 5);
   }
+#if PLANE_RADAR_DEBUG
+  snprintf(s_skip_home_checkbox_attrs, sizeof(s_skip_home_checkbox_attrs),
+           "type=\"checkbox\"%s", readSkipHome() ? " checked" : "");
+  s_param_skip_home.setValue("T", 2);
+#endif
+  snprintf(s_travel_checkbox_attrs, sizeof(s_travel_checkbox_attrs),
+           "type=\"checkbox\"%s", readTravelEnabled() ? " checked" : "");
+  s_param_travel_on.setValue("T", 2);
   s_param_phone_pass.setValue("", 63);  // never echo a stored password
 }
 
@@ -190,8 +243,24 @@ void savePhoneNetworkFromPortal() {
     strncpy(s_phone_ssid, ssid.c_str(), sizeof(s_phone_ssid) - 1);
     s_phone_ssid[sizeof(s_phone_ssid) - 1] = '\0';
   }
+  // An unticked checkbox is not submitted at all, so empty = off. Ignored without
+  // a saved hotspot, so the flag can never leave the unit with no network at all.
+#if PLANE_RADAR_DEBUG
+  const bool skip_home = ssid.length() > 0 && s_param_skip_home.getValue()[0] == 'T';
+#else
+  const bool skip_home = false;
+#endif
+  phone.putBool(kPhoneKeySkipHome, skip_home);
+  const bool travel_on = s_param_travel_on.getValue()[0] == 'T';
+  phone.putBool(kPhoneKeyTravel, travel_on);
   phone.end();
+  Serial.printf("Travel mode: %s (applies after a reboot)\n", travel_on ? "on" : "off");
+#if PLANE_RADAR_DEBUG
+  Serial.printf("Phone hotspot: \"%s\", GPS port %ld, skip home Wi-Fi: %s\n", s_phone_ssid,
+                port, skip_home ? "YES (debug)" : "no");
+#else
   Serial.printf("Phone hotspot: \"%s\", GPS port %ld\n", s_phone_ssid, port);
+#endif
 }
 
 void onPortalParamsSaved() {
@@ -216,6 +285,10 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_phone_ssid);
   wm.addParameter(&s_param_phone_pass);
   wm.addParameter(&s_param_gps_port);
+  wm.addParameter(&s_param_travel_on);
+#if PLANE_RADAR_DEBUG
+  wm.addParameter(&s_param_skip_home);
+#endif
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -318,6 +391,22 @@ void ensureWifiManager() {
   if (s_wm_configured) {
     return;
   }
+#if PLANE_RADAR_DEBUG
+  static bool s_events = false;
+  if (!s_events) {
+    s_events = true;
+    // Flags every Wi-Fi drop with its reason code, so a dropping link can be told
+    // apart from a feed or phone-side problem.
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+      if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        Serial.printf("wifi: DROPPED (reason %u) at %lu ms\n",
+                      static_cast<unsigned>(info.wifi_sta_disconnected.reason), millis());
+      } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+        Serial.printf("wifi: link up, got IP at %lu ms\n", millis());
+      }
+    });
+  }
+#endif
   s_wm.setConfigPortalTimeout(config::kWifiPortalTimeoutSec);
   s_wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                            IPAddress(255, 255, 255, 0));
@@ -551,7 +640,13 @@ ConnectResult connectSavedNetwork(bool show_ui) {
   String phone_pass;
   const bool have_phone = loadPhoneNetwork(&phone_ssid, &phone_pass) &&
                           phone_ssid != s_home_ssid;
-  const bool have_home = s_home_ssid.length() > 0;
+  const bool skip_home = have_phone && readSkipHome();
+  const bool have_home = s_home_ssid.length() > 0 && !skip_home;
+#if PLANE_RADAR_DEBUG
+  if (skip_home) {
+    Serial.println("Wi-Fi: DEBUG skip-home is ON, the home network will not be tried");
+  }
+#endif
   if (!have_home && !have_phone) {
     return ConnectResult::Failed;
   }
@@ -812,6 +907,8 @@ bool wifiSetupConnect() {
   statusScreenConnectFailed();
   return false;
 }
+
+bool travelModeEnabled() { return readTravelEnabled(); }
 
 bool wifiOnPhoneNetwork() {
   if (s_phone_ssid[0] == '\0' || WiFi.status() != WL_CONNECTED) {

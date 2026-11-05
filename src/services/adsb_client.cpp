@@ -2,6 +2,7 @@
 #include "services/net_lock.h"
 
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 
 #include <ArduinoJson.h>
@@ -242,6 +243,141 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
 }
 
+#ifndef ADSB_WHOLE_LIST_PARSE
+constexpr size_t kPlaneBufLen = 1536;
+
+/**
+ * Streams the response and parses ONE aircraft object at a time.
+ *
+ * The whole-list parse keeps every aircraft in RAM while the TLS session is
+ * still holding its buffers, so a busy sky (about 14+ planes on a CYD, which
+ * has no PSRAM) ran out of memory mid-parse. Here each {...} inside "ac" is
+ * collected into a small buffer, parsed into a small reused document, copied
+ * into `out`, and dropped, so peak memory no longer depends on how many
+ * aircraft are in the sky.
+ *
+ * Returns false with *why set if the stream ended or broke before "ac" closed.
+ */
+template <typename Reader>
+bool parseAircraftStream(Reader& body, Aircraft* out, size_t* count,
+                         const char** why, char* buf, size_t buf_len,
+                         const JsonDocument& filter) {
+  // buf (one aircraft object, raw JSON) and filter are made by the caller
+  // BEFORE the TLS connection opens, while there is still heap to spare.
+  JsonDocument one;
+
+  int depth = 0;
+  bool in_str = false;
+  bool esc = false;
+  bool in_ac = false;
+  bool collecting = false;
+  bool overflow = false;
+  size_t len = 0;
+  char last_str[4] = {0, 0, 0, 0};  // last top-level string: spots the "ac" key
+  size_t last_len = 0;
+  bool finished = false;
+  size_t n = 0;
+  size_t dropped = 0;
+
+  int c;
+  while ((c = body.read()) >= 0) {
+    const char ch = static_cast<char>(c);
+    if (collecting) {
+      if (len < buf_len - 1) {
+        buf[len++] = ch;
+      } else {
+        overflow = true;
+      }
+    }
+    if (in_str) {
+      if (esc) {
+        esc = false;
+      } else if (ch == '\\') {
+        esc = true;
+      } else if (ch == '"') {
+        in_str = false;
+      } else if (depth == 1 && last_len < sizeof(last_str)) {
+        last_str[last_len++] = ch;
+      }
+      continue;
+    }
+    switch (ch) {
+      case '"':
+        in_str = true;
+        if (depth == 1) {
+          last_len = 0;
+          memset(last_str, 0, sizeof(last_str));
+        }
+        break;
+      case '{':
+      case '[':
+        ++depth;
+        if (ch == '[' && depth == 2 && last_str[0] == 'a' && last_str[1] == 'c' &&
+            last_str[2] == '\0') {
+          in_ac = true;
+        } else if (ch == '{' && in_ac && depth == 3) {
+          collecting = true;
+          overflow = false;
+          len = 0;
+          buf[len++] = '{';
+        }
+        break;
+      case '}':
+      case ']':
+        if (ch == '}' && collecting && depth == 3) {
+          collecting = false;
+          if (overflow) {
+            ++dropped;
+          } else if (n < kMaxAircraft) {
+            one.clear();
+            const DeserializationError e = deserializeJson(
+                one, buf, len, DeserializationOption::Filter(filter));
+            const JsonObject plane = one.as<JsonObject>();
+            if (!e && !plane.isNull() && plane["lat"].is<float>() &&
+                plane["lon"].is<float>() &&
+                (config::kAdsbShowGroundAircraft || !isOnGround(plane))) {
+              Aircraft& a = out[n];
+              a.lat = plane["lat"].as<float>();
+              a.lon = plane["lon"].as<float>();
+              a.nose_deg = pickNoseHeading(plane);
+              a.track_deg = pickTrackHeading(plane);
+              a.gs_knots = pickGroundSpeed(plane);
+              float seen_pos = 0.0f;
+              readJsonFloat(plane, "seen_pos", &seen_pos);
+              if (seen_pos < 0.0f) seen_pos = 0.0f;
+              if (seen_pos > 30.0f) seen_pos = 30.0f;
+              a.pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
+              fillTagFields(&a, plane);
+              ++n;
+            }
+          }
+        }
+        --depth;
+        if (ch == ']' && in_ac && depth == 1) {
+          finished = true;
+        }
+        break;
+      default:
+        break;
+    }
+    if (finished) {
+      break;
+    }
+  }
+
+  *count = n;
+  if (dropped > 0) {
+    Serial.printf("adsb: %u oversized aircraft skipped\n",
+                  static_cast<unsigned>(dropped));
+  }
+  if (!finished) {
+    *why = "IncompleteInput";
+    return false;
+  }
+  return true;
+}
+#endif  // ADSB_WHOLE_LIST_PARSE
+
 }  // namespace
 
 void init() {
@@ -292,6 +428,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
+#ifdef ADSB_WHOLE_LIST_PARSE
   // Keep only the fields we render; the rest never reaches RAM.
   JsonDocument filter;
   JsonObject f = filter["ac"].add<JsonObject>();
@@ -301,6 +438,21 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
         "category"}) {
     f[key] = true;
   }
+
+#endif
+
+#ifndef ADSB_WHOLE_LIST_PARSE
+  // On this task's stack (16 KB, reserved at start), NOT the heap: the TLS
+  // handshake needs nearly all of the heap on a board without PSRAM.
+  char plane_buf[kPlaneBufLen];
+  JsonDocument plane_filter;  // object-level: the fields we render
+  for (const char* key :
+       {"lat", "lon", "true_heading", "mag_heading", "track", "dir", "gs",
+        "tas", "ias", "alt_baro", "alt_geom", "seen_pos", "flight", "hex", "t",
+        "category"}) {
+    plane_filter[key] = true;
+  }
+#endif
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -317,9 +469,19 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   http.collectHeaders(kWantedHeaders, 1);
 
   http.setTimeout(kRequestTimeoutMs);
+#if PLANE_RADAR_DEBUG
+  const unsigned long fetch_t0 = millis();
+#endif
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
+#if PLANE_RADAR_DEBUG
+    Serial.printf("adsb: HTTP %d (free %u, blk %u, min %u)\n", code,
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()),
+                  static_cast<unsigned>(ESP.getMinFreeHeap()));
+#else
     Serial.printf("adsb: HTTP %d\n", code);
+#endif
     http.end();
     return false;
   }
@@ -341,6 +503,51 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   PollingSocketSource source(http, *stream, millis() + kRequestTimeoutMs);
   BodyReader body(source, framing, http.getSize());
+#ifndef ADSB_WHOLE_LIST_PARSE
+  Aircraft parsed[kMaxAircraft];
+  size_t n = 0;
+  const char* why = "";
+  const bool ok = parseAircraftStream(body, parsed, &n, &why, plane_buf,
+                                      kPlaneBufLen, plane_filter);
+  body.drain();
+  http.end();
+  if (!ok) {
+    if (body.framingError()) {
+      Serial.println("adsb: malformed chunked body");
+    } else if (body.bytesRead() == 0) {
+      Serial.println("adsb: empty response");
+    } else {
+#if PLANE_RADAR_DEBUG
+      Serial.printf("adsb: JSON parse error: %s (free %u, blk %u, min %u) "
+                    "[wifi %s, rssi %d, got %u bytes in %lu ms, stack free %u]\n",
+                    why, static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(ESP.getMaxAllocHeap()),
+                    static_cast<unsigned>(ESP.getMinFreeHeap()),
+                    WiFi.status() == WL_CONNECTED ? "up" : "DOWN", WiFi.RSSI(),
+                    static_cast<unsigned>(body.bytesRead()), millis() - fetch_t0,
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#else
+      Serial.printf("adsb: JSON parse error: %s\n", why);
+#endif
+    }
+    return false;
+  }
+  // A good response with an empty list while planes were showing is almost
+  // always a feed hiccup: keep the last list instead of blanking the screen.
+  // Three zeros in a row are believed (the sky really is empty).
+  static uint8_t s_zero_streak = 0;
+  if (n == 0 && s_aircraft_count >= 3 && s_zero_streak < 2) {
+    ++s_zero_streak;
+    Serial.printf("adsb: 0 aircraft ignored (keeping %u)\n",
+                  static_cast<unsigned>(s_aircraft_count));
+    return false;
+  }
+  s_zero_streak = 0;
+  publish(parsed, n);
+  Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  return true;
+}
+#else
   JsonDocument doc;
   const DeserializationError err =
       deserializeJson(doc, body, DeserializationOption::Filter(filter));
@@ -355,7 +562,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     } else if (body.bytesRead() == 0) {
       Serial.println("adsb: empty response");
     } else {
-      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+      Serial.printf("adsb: JSON parse error: %s (free %u, blk %u, min %u)\n", err.c_str(),
+                    static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(ESP.getMaxAllocHeap()),
+                    static_cast<unsigned>(ESP.getMinFreeHeap()));
     }
     return false;
   }
@@ -400,5 +610,6 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
+#endif
 
 }  // namespace services::adsb

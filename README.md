@@ -55,18 +55,21 @@ Take the radar in a car and it can centre itself on where you are, with no typin
 **One-time setup**
 
 1. On the radar's **Setup** page (LAN address, or the setup network on first run), enter your phone's hotspot name and password under *Phone hotspot for trips*. Your home Wi-Fi stays the first network and is remembered separately; the hotspot can never replace it.
-2. For live GPS, run an Android app that serves **NMEA over TCP** on the phone (the radar connects to the hotspot gateway, which is the phone) and enter its port under *Phone GPS app port* (default 10110). Without an app, the Wi-Fi lookup below still gives an approximate position.
+2. For live GPS, run an Android app that serves **NMEA over TCP** on the phone (the radar connects to the hotspot gateway, which is the phone) and enter its port under *Phone GPS app port* (default 10110). Tested with **GPS Tether** (Android, Server mode, encryption off, port 10110). Its free edition runs the Server in 5-minute sessions; restart the Server to continue and the radar reconnects on its own within about 30 seconds. The paid edition removes the limit. Without a GPS app the radar stays on the saved location.
 
 **How it behaves**
 
 - At home the radar joins your home Wi-Fi and uses the saved location. Away from home it joins the phone's hotspot instead (it scans and picks whichever of the two is in range).
 - On the hotspot it reads GPS from the app on the phone (the hotspot gateway is the phone, so no IP to enter). The first fix is used at once. After that the radar re-centres at most once a minute, and only after you have moved more than 1 km, so it does not churn while you drive.
-- **No phone GPS?** After about 20 s it falls back to an approximate position from the Wi-Fi networks in range, looked up through [beaconDB](https://beacondb.net) (only BSSIDs and signal strengths are sent; phone hotspots and networks named `*_nomap` are left out). This is usually good to tens of metres in towns and poor in rural areas; answers worse than 3 km are ignored.
-- The menu shows where the position comes from: *saved*, *phone GPS* or *Wi-Fi lookup*. Back on the home Wi-Fi the saved location returns. The travel position is never saved over your home position.
+- The menu shows where the position comes from (*saved* or *phone GPS*) and the radar's own address. Back on the home Wi-Fi the saved location returns. The travel position is never saved over your home position.
 - While connected, the LAN page has **Setup** and **Info** only. Changing the home Wi-Fi means *Reset Wi-Fi* in the menu (or hold BOOT 3 s and tap), which opens the setup network again. That also works when no saved network is in range.
 - Keep the GPS app running in the background and its battery optimisation off.
+- **Travel mode switch:** the setup page has a *Travel mode* checkbox. It defaults to **on when the board has PSRAM and off when it does not** (the standard CYD). Ticking it on a CYD works in testing but leaves little free memory. It applies after a reboot.
+- **Debug build:** add `-DPLANE_RADAR_DEBUG=1` to the build flags to turn on extra serial diagnostics: a `heap:` line every 30 s, `wifi: DROPPED (reason N)` lines, details on failed plane fetches (free heap, signal, bytes, time, stack), and a *DEBUG: skip home Wi-Fi* checkbox on the setup page. With it ticked (and a hotspot saved) the radar ignores the home network so travel mode can be tested at a desk; untick it to go back. All of this is off by default.
 
 ## Board notes
+
+- **Memory (read this before choosing a board):** the standard CYD has **no PSRAM**. Its free heap is about 110 KB at idle and drops to about 43 KB during a plane fetch, because the TLS connection to the feed holds most of it. Travel mode adds a GPS connection and a task on top of that. With the original whole-list JSON parse the CYD ran out of memory (`NoMemory`, `BIGNUM - Memory allocation failed`) once about 14 or more aircraft were in the fetch radius; what matters is how many planes are in the sky at that moment, not the range setting. This fork now parses one aircraft at a time, which fixed it in testing (17 to 21 aircraft, on the phone hotspot with GPS connected), but the margin is thin and occasional `IncompleteInput` errors from the hotspot link remain. If you want travel mode, or plan to add features, use a board **with PSRAM** (the round board is an ESP32-S3 with 8 MB PSRAM and ran with plenty of room).
 
 - **CYD panel:** this 2.4" board's screen is an **ST7789**, built with `-DCYD_PANEL_ST7789`. With the ILI9341 driver the picture is mirrored, the colours are wrong and the bottom 80 rows stay noise.
 - **CYD LED pins:** on the test board green and blue were swapped from the usual CYD pinout (R4, G17, B16). The LED flashes red, green, blue at boot; if yours shows a different order, swap the pins in `config.h`.

@@ -19,6 +19,8 @@ bool wifiReconnect();
 bool wifiOnPhoneNetwork();
 /** TCP port of the phone's GPS app, as saved on the setup page. */
 uint16_t phoneGpsPort();
+/** Travel mode switch from the setup page. Default: on with PSRAM, off without. */
+bool travelModeEnabled();
 /** Keeps the LAN config portal alive; call every loop() iteration. */
 void wifiLoop();
 bool wifiBootButtonPressed();
