@@ -23,7 +23,11 @@ namespace config {
 // --- Wi-Fi portal ---
 // Each board type gets its own setup network and network name, so two units on
 // one LAN don't fight over plane-radar.local (Tim runs a CYD and a round one).
-#if defined(BOARD_CYD24)
+#if defined(BOARD_NICEMCU)
+constexpr char kPortalApName[] = "PlaneRadar-NiceMCU";
+constexpr char kPortalHostname[] = "plane-radar-nicemcu";
+constexpr char kPortalHostUrl[] = "plane-radar-nicemcu.local";
+#elif defined(BOARD_CYD24)
 constexpr char kPortalApName[] = "PlaneRadar-CYD";
 constexpr char kPortalHostname[] = "plane-radar-cyd";
 constexpr char kPortalHostUrl[] = "plane-radar-cyd.local";
@@ -67,6 +71,24 @@ constexpr unsigned long kBootTapMinMs = 40UL;
 // (Tim's bench 2026-10-30). 5 = un-mirrored portrait but software thinks 320x240;
 // 4 = mirrored. So: portrait rotation 0 (try 2 if upside down).
 // Touch (XPT2046) shares this bus: CS 33, IRQ 36. Used for tap = next range.
+#if defined(BOARD_NICEMCU)
+// NiceMCU-32S-DEV 2.8" IPS (XH-32S, classic ESP32, no PSRAM): ST7789 on SPI3 (no
+// MISO), CST816D capacitive touch on I2C 0x15. Pins from the vendor's
+// board_config.h (github.com/NiceMCU-01/NiceMCU-32S-DEV_2.8IPS). GPIO2 resets the
+// panel AND the touch chip. Backlight GPIO25 is active high (vendor drives it
+// LOW = off at start). No calibration needed (capacitive).
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_2;
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_15;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_12;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_13;
+constexpr gpio_num_t kDisplayPinMiso = GPIO_NUM_NC;
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_14;
+constexpr gpio_num_t kDisplayPinBacklight = GPIO_NUM_25;
+constexpr gpio_num_t kTouchPinSda = GPIO_NUM_33;
+constexpr gpio_num_t kTouchPinScl = GPIO_NUM_32;
+constexpr gpio_num_t kTouchPinIrq = GPIO_NUM_36;
+constexpr uint8_t kTouchI2cAddr = 0x15;
+#else
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;  // tied to EN on the CYD
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_15;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_2;
@@ -76,12 +98,19 @@ constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_14;
 constexpr gpio_num_t kDisplayPinBacklight = GPIO_NUM_27;
 constexpr gpio_num_t kTouchPinCs = GPIO_NUM_33;
 constexpr gpio_num_t kTouchPinIrq = GPIO_NUM_36;
+#endif
 // RGB LED (common anode, active LOW) and light sensor -- usual CYD pins;
 // the boot R/G/B test confirms them.
 constexpr int kLedPinR = 4;
+#if defined(BOARD_NICEMCU)
+// Schematic nets IO4/IO16/IO17_LED; which of 16/17 is green is unverified (boot test).
+constexpr int kLedPinG = 16;
+constexpr int kLedPinB = 17;
+#else
 constexpr int kLedPinG = 17;  // this board: G/B swapped vs the usual CYD (Tim's bench 10-30)
 constexpr int kLedPinB = 16;
-constexpr int kLdrPin = 34;
+#endif
+constexpr int kLdrPin = 34;  // NiceMCU: schematic shows the LDR divider (GT36516) on IO34, unverified
 // LDR calibration (raw ADC, 0 dB). Placeholders until the serial "ldr:" log
 // gives real dark/bright readings. Either order works (dark may be > bright).
 constexpr int kLdrDarkRaw = 300;
@@ -97,8 +126,13 @@ constexpr int kDisplayRotation = 0;  // portrait; this panel reads much clearer 
 constexpr int kRadarOffsetX = 0;
 constexpr int kRadarOffsetY = 0;
 
+#if defined(BOARD_NICEMCU)
+constexpr uint32_t kDisplaySpiWriteHz = 24000000;  // vendor's value
+constexpr bool kDisplayInvert = true;              // vendor calls invertDisplay(true)
+#else
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 constexpr bool kDisplayInvert = false;
+#endif
 constexpr bool kDisplayRgbOrder = false;
 #elif defined(BOARD_JC3636)
 // --- Display: Guition JC3636W518C (_I_Y), 1.85" round 360x360, ST77916, QSPI ---

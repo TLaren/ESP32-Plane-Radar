@@ -15,7 +15,11 @@ class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9341 _panel;
 #endif
   lgfx::Light_PWM _light;
+#if defined(BOARD_NICEMCU)
+  lgfx::Touch_CST816S _touch;  // CST816D uses the same register map
+#else
   lgfx::Touch_XPT2046 _touch;
+#endif
 
 public:
   LGFX() {
@@ -35,17 +39,23 @@ public:
     {
       auto cfg = _panel.config();
       cfg.pin_cs = static_cast<int>(config::kDisplayPinCs);
+#if defined(BOARD_NICEMCU)
+      cfg.pin_rst = static_cast<int>(config::kDisplayPinRst);  // also resets the touch chip
+      cfg.readable = false;                                    // no MISO wired
+      cfg.bus_shared = false;                                  // touch is on I2C
+#else
       cfg.pin_rst = -1;
+      cfg.readable = true;
+      cfg.bus_shared = true;  // touch controller sits on the same SPI bus
+#endif
       cfg.pin_busy = -1;
       cfg.panel_width = 240;
       cfg.panel_height = 320;
       cfg.offset_x = 0;
       cfg.offset_y = 0;
       cfg.offset_rotation = 0;
-      cfg.readable = true;
       cfg.invert = config::kDisplayInvert;
       cfg.rgb_order = config::kDisplayRgbOrder;
-      cfg.bus_shared = true;  // touch controller sits on the same SPI bus
       _panel.config(cfg);
     }
     {
@@ -57,6 +67,26 @@ public:
       _light.config(cfg);
       _panel.setLight(&_light);
     }
+#if defined(BOARD_NICEMCU)
+    {
+      auto cfg = _touch.config();
+      cfg.i2c_port = 1;
+      cfg.i2c_addr = config::kTouchI2cAddr;
+      cfg.pin_sda = static_cast<int>(config::kTouchPinSda);
+      cfg.pin_scl = static_cast<int>(config::kTouchPinScl);
+      cfg.pin_int = static_cast<int>(config::kTouchPinIrq);
+      cfg.pin_rst = -1;  // shared with the panel reset (GPIO2), pulsed by the panel init
+      cfg.freq = 400000;
+      cfg.x_min = 0;
+      cfg.x_max = 239;
+      cfg.y_min = 0;
+      cfg.y_max = 319;
+      cfg.offset_rotation = 0;  // bench: adjust if taps land mirrored/rotated
+      cfg.bus_shared = false;
+      _touch.config(cfg);
+      _panel.setTouch(&_touch);
+    }
+#else
     {
       // Resistive touch on the display's SPI bus. Only "is it pressed" is used
       // so far (tap = next range); the x/y limits are rough, uncalibrated.
@@ -77,6 +107,7 @@ public:
       _touch.config(cfg);
       _panel.setTouch(&_touch);
     }
+#endif
     setPanel(&_panel);
   }
 };

@@ -29,7 +29,10 @@ bool touchDown() {
 }
 #endif
 
-#if defined(BOARD_CYD24)
+#if defined(BOARD_NICEMCU)
+// Capacitive touch reports panel coordinates directly: nothing to calibrate.
+void touchInit() {}
+#elif defined(BOARD_CYD24)
 namespace {
 constexpr char kTouchPrefs[] = "touch";
 }  // namespace
