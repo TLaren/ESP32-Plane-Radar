@@ -1,0 +1,16 @@
+{
+  "name": "Plane Radar - NiceMCU 2.8\" (NiceMCU-32S-DEV)",
+  "version": "VERSION",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "plane-radar-nicemcu.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

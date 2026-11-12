@@ -38,7 +38,7 @@ jobs:
 
       - name: Build and merge
         run: |
-          for e in supermini cyd24 jc3636; do
+          for e in supermini cyd24 jc3636 nicemcu; do
             pio run -e "$e"
             pio run -t merge -e "$e"
           done
@@ -53,6 +53,7 @@ jobs:
           cp .pio/build/supermini/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
           cp .pio/build/cyd24/firmware-merged.bin "dist/plane-radar-cyd24-${VERSION}.bin"
           cp .pio/build/jc3636/firmware-merged.bin "dist/plane-radar-round-jc3636-${VERSION}.bin"
+          cp .pio/build/nicemcu/firmware-merged.bin "dist/plane-radar-nicemcu-${VERSION}.bin"
           (cd dist && sha256sum *.bin > SHA256SUMS.txt)
           echo "version=${VERSION}" >> "$GITHUB_ENV"
 

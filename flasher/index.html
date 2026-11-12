@@ -30,7 +30,7 @@
 <body>
 <main>
   <h1>Plane Radar</h1>
-  <p class="lead">Live ADS-B radar for a CYD or a round ESP32-S3 display. Plug the board in by USB, click Install, pick the serial port. Either button works: the flasher reads the chip and installs the right firmware (CYD = ESP32, round = ESP32-S3). Chrome or Edge on a computer.</p>
+  <p class="lead">Live ADS-B radar for a CYD, a NiceMCU 2.8" or a round ESP32-S3 display. Plug the board in by USB, click the Install button under YOUR board, pick the serial port. The CYD and the NiceMCU are both plain ESP32 boards, so use the button that matches the board you have. Chrome or Edge on a computer.</p>
 
   <div class="boards">
     <section class="card">
@@ -41,6 +41,15 @@
         <span slot="unsupported" class="unsupported">This browser can't flash. Use Chrome or Edge on a computer.</span>
       </esp-web-install-button>
       <p class="note">Hold the BOOT button on the back for the whole install, then press RST. Without it the install stops with a boot-mode error.</p>
+    </section>
+
+    <section class="card">
+      <h2>NiceMCU 2.8" (NiceMCU-32S-DEV)</h2>
+      <p>240x320 IPS, capacitive touch (no calibration), RGB LED.</p>
+      <esp-web-install-button manifest="manifest-nicemcu.json">
+        <span slot="unsupported" class="unsupported">This browser can't flash. Use Chrome or Edge on a computer.</span>
+      </esp-web-install-button>
+      <p class="note">No buttons needed. If the port doesn't show up, unplug and plug it back in.</p>
     </section>
 
     <section class="card">
@@ -57,7 +66,7 @@
   <h2>After installing</h2>
   <ol>
     <li>CYD only: calibrate the touch screen. Drag from each corner arrow toward the centre.</li>
-    <li>Join the Wi-Fi network shown on the screen (PlaneRadar-CYD or PlaneRadar-Round) from a phone and open 192.168.4.1.</li>
+    <li>Join the Wi-Fi network shown on the screen (PlaneRadar-CYD, PlaneRadar-NiceMCU or PlaneRadar-Round) from a phone and open 192.168.4.1.</li>
     <li>Pick your Wi-Fi, enter the password and your latitude and longitude (6 decimals at most), and save.</li>
   </ol>
   <p>Source and details: <a href="https://github.com/TLaren/ESP32-Plane-Radar">github.com/TLaren/ESP32-Plane-Radar</a></p>

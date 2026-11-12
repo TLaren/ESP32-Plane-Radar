@@ -24,6 +24,8 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 | Extras | RGB LED, light sensor | none |
 | Setup Wi-Fi / address | `PlaneRadar-CYD` / `plane-radar-cyd.local` | `PlaneRadar-Round` / `plane-radar-round.local` |
 
+**Also supported: NiceMCU-32S-DEV 2.8" (`env:nicemcu`).** A classic ESP32 with a 240x320 ST7789 IPS panel, CST816D capacitive touch (no calibration needed), RGB LED on GPIO 4/16/17, no PSRAM. It uses the CYD portrait layout. Setup Wi-Fi `PlaneRadar-NiceMCU` / `plane-radar-nicemcu.local`. Uploads over USB with no buttons. Its panel looks dimmer than the CYD's at the same brightness setting; that is the hardware, not the firmware.
+
 ## Features added in this fork
 
 - **Info display.** CYD: a strip with the plane count, the nearest airborne plane (callsign, type, altitude, distance, direction) and the next two. Round: the nearest plane above the S label. Planes on the ground are counted but never shown as "nearest".
@@ -37,10 +39,10 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 
 ## Build and flash
 
-The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar/): plug the board in, click Install, pick its port. On the CYD, hold **BOOT** for the whole install, then press RST. It's rebuilt automatically from this branch on every push. The flasher covers only the two boards with fixed hardware (CYD and round); the Super Mini build depends on how you wire it, so it has to be built from source with pins to match. To build it yourself instead:
+The easy way is the [browser flasher](https://tlaren.github.io/ESP32-Plane-Radar/): plug the board in, click Install, pick its port. On the CYD, hold **BOOT** for the whole install, then press RST. It's rebuilt automatically from this branch on every push. The flasher covers only the boards with fixed hardware (CYD, NiceMCU and round); the Super Mini build depends on how you wire it, so it has to be built from source with pins to match. To build it yourself instead:
 
 1. Install VS Code and the PlatformIO extension, then open this folder.
-2. Pick the environment for your board: `env:cyd24` or `env:jc3636`.
+2. Pick the environment for your board: `env:cyd24`, `env:nicemcu` or `env:jc3636`.
 3. Build and upload.
    - **CYD:** auto-reset into the bootloader doesn't work on these boards. Hold **BOOT** for the whole upload. Set `upload_port` in `platformio.ini` if PlatformIO picks the wrong COM port.
    - **Round:** uploads over USB-C with no buttons. The board has no reset button: unplug it to reset.

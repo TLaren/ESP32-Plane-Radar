@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and merge
         run: |
-          for e in cyd24 jc3636; do
+          for e in cyd24 jc3636 nicemcu; do
             pio run -e "$e"
             pio run -t merge -e "$e"
           done
@@ -59,6 +59,7 @@ jobs:
           cp docs/images/cyd-flights.jpg docs/images/round-flights.jpg site/images/
           cp .pio/build/cyd24/firmware-merged.bin site/plane-radar-cyd24.bin
           cp .pio/build/jc3636/firmware-merged.bin site/plane-radar-round-jc3636.bin
+          cp .pio/build/nicemcu/firmware-merged.bin site/plane-radar-nicemcu.bin
           for m in flasher/manifest-*.json; do
             sed "s/\"VERSION\"/\"${VERSION}\"/" "$m" > "site/$(basename "$m")"
           done
