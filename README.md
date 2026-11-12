@@ -26,6 +26,11 @@ This fork adds two more boards to [MatixYo's Plane Radar](https://github.com/Mat
 
 **Also supported: NiceMCU-32S-DEV 2.8" (`env:nicemcu`).** A classic ESP32 with a 240x320 ST7789 IPS panel, CST816D capacitive touch (no calibration needed), RGB LED on GPIO 4/16/17, no PSRAM. It uses the CYD portrait layout. Setup Wi-Fi `PlaneRadar-NiceMCU` / `plane-radar-nicemcu.local`. Uploads over USB with no buttons. Its panel looks dimmer than the CYD's at the same brightness setting; that is the hardware, not the firmware.
 
+| NiceMCU: radar | NiceMCU: settings |
+| --- | --- |
+| <img src="docs/images/nicemcu-flights.jpg" width="300" alt="NiceMCU 2.8 inch: radar on top, info strip below"> | <img src="docs/images/nicemcu-settings.jpg" width="300" alt="NiceMCU settings: screen and LED brightness, saved location (blurred), Reset Wi-Fi"> |
+| <img src="docs/images/nicemcu-wifi-setup.jpg" width="300" alt="NiceMCU Wi-Fi setup instructions"> | <img src="docs/images/nicemcu-setup-page.jpg" width="300" alt="Setup page in a phone browser (location blurred)"> |
+
 ## Features added in this fork
 
 - **Info display.** CYD: a strip with the plane count, the nearest airborne plane (callsign, type, altitude, distance, direction) and the next two. Round: the nearest plane above the S label. Planes on the ground are counted but never shown as "nearest".

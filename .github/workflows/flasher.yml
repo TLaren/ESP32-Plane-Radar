@@ -56,7 +56,7 @@ jobs:
           VERSION="$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
           mkdir -p site/images
           cp flasher/index.html site/
-          cp docs/images/cyd-flights.jpg docs/images/round-flights.jpg site/images/
+          cp docs/images/cyd-flights.jpg docs/images/round-flights.jpg docs/images/nicemcu-flights.jpg site/images/
           cp .pio/build/cyd24/firmware-merged.bin site/plane-radar-cyd24.bin
           cp .pio/build/jc3636/firmware-merged.bin site/plane-radar-round-jc3636.bin
           cp .pio/build/nicemcu/firmware-merged.bin site/plane-radar-nicemcu.bin
